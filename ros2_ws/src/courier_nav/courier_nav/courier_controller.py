@@ -59,8 +59,8 @@ class MissionController(Node):
             [0, 1, 0, 1, 0],  # Row 3
             [0, 0, 0, 0, 0]   # Row 4
         ]
-        self.start_cell = (0, 0)  # Row 0, Col 0 → (X=0.5, Y=0.5)
-        self.goal_cell = (4, 2)   # Row 4, Col 2 → (X=2.5, Y=4.5)
+        self.start_cell = (0, 0)  # Row 0, Col 0 → Gazebo (X=0.5, Y=0.5)
+        self.goal_cell = (4, 2)   # Row 4, Col 2 → Gazebo (X=4.5, Y=2.5)
         self.cell_size = 1.0
         
         # Add grid configuration to blackboard
@@ -144,9 +144,9 @@ class MissionController(Node):
         for i, cell in enumerate(path):
             row, col = cell
             
-            # Converti in coordinate mondo
-            x = (col + 0.5) * self.cell_size
-            y = (row + 0.5) * self.cell_size
+            # Converti in coordinate mondo (swap X/Y for Gazebo)
+            x = (row + 0.5) * self.cell_size  # Row → X
+            y = (col + 0.5) * self.cell_size  # Column → Y
             
             # Crea marker
             marker = Marker()

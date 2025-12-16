@@ -176,6 +176,7 @@ class LoadGridBFS(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="grid_map", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="start_cell", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="goal_cell", access=py_trees.common.Access.READ)
+        self.blackboard.register_key(key="cell_size", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="logger", access=py_trees.common.Access.READ)
     
     def update(self):
@@ -198,6 +199,14 @@ class LoadGridBFS(py_trees.behaviour.Behaviour):
         
         if logger:
             logger.info(f"{self.name}: ✅ Path computed = {len(path)} waypoints: {path}")
+            # 🆕 Debug: Show converted world coordinates for each waypoint
+            cell_size = self.blackboard.get("cell_size")
+            rows = len(grid_map)
+            logger.info(f"{self.name}: 📍 Path in world coordinates:")
+            for i, (r, c) in enumerate(path):
+                wx = (r + 0.5) * cell_size  # Row → X in Gazebo
+                wy = (c + 0.5) * cell_size  # Column → Y in Gazebo
+                logger.info(f"{self.name}:    [{i}] Cell({r},{c}) → World({wx:.2f},{wy:.2f})")
         
         return Status.SUCCESS
 
@@ -210,6 +219,7 @@ class FollowBFSPath(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="path_queue", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="target_publisher", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="cell_size", access=py_trees.common.Access.READ)
+        self.blackboard.register_key(key="grid_map", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="current_target", access=py_trees.common.Access.WRITE)
         self.blackboard.register_key(key="logger", access=py_trees.common.Access.READ)
     
@@ -226,11 +236,10 @@ class FollowBFSPath(py_trees.behaviour.Behaviour):
         next_cell = path[0]
         row, col = next_cell
         
-        # 🆕 CORREZIONE: Converti correttamente
-        # In Gazebo: X = colonna, Y = riga
+        # 🔄 Swap X/Y for Gazebo coordinate system
         cell_size = self.blackboard.get("cell_size")
-        target_x = (col + 0.5) * cell_size  # ✅ col → X
-        target_y = (row + 0.5) * cell_size  # ✅ row → Y
+        target_x = (row + 0.5) * cell_size  # Row → X in Gazebo
+        target_y = (col + 0.5) * cell_size  # Column → Y in Gazebo
         
         # Publish target
         target_pub = self.blackboard.get("target_publisher")
@@ -398,6 +407,7 @@ class NavigateAllWaypoints(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="path_queue", access=py_trees.common.Access.WRITE)
         self.blackboard.register_key(key="target_publisher", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="cell_size", access=py_trees.common.Access.READ)
+        self.blackboard.register_key(key="grid_map", access=py_trees.common.Access.READ)
         self.blackboard.register_key(key="current_pose", access=py_trees.common.Access.READ)  # 🆕
         self.blackboard.register_key(key="logger", access=py_trees.common.Access.READ)
         self.target_tolerance = 0.15
@@ -419,10 +429,19 @@ class NavigateAllWaypoints(py_trees.behaviour.Behaviour):
         current_waypoint = path[0]
         row, col = current_waypoint
         
-        # Convert to world coordinates
+        # Convert to world coordinates (swap X/Y for Gazebo)
         cell_size = self.blackboard.get("cell_size")
-        target_x = (col + 0.5) * cell_size  # ✅ col → X
-        target_y = (row + 0.5) * cell_size  # ✅ row → Y
+        target_x = (row + 0.5) * cell_size  # Row → X in Gazebo
+        target_y = (col + 0.5) * cell_size  # Column → Y in Gazebo
+        
+        # 🆕 Get current pose FIRST before using it
+        current_pose = self.blackboard.get("current_pose")
+        
+        # 🆕 Debug: verifica current_pose
+        if current_pose is None:
+            if logger:
+                logger.warn(f"{self.name}: ⚠️ current_pose è None!")
+            return py_trees.common.Status.FAILURE
         
         # 🆕 Se è un nuovo target, pubblicalo
         if self.current_target_world != (target_x, target_y):
@@ -434,17 +453,11 @@ class NavigateAllWaypoints(py_trees.behaviour.Behaviour):
                 target_pub(target_x, target_y)
             
             if logger:
+                # 🆕 Show current robot position when setting new target
                 logger.info(f"{self.name}: 🚀 Nuovo waypoint: Cell({row},{col}) → World({target_x:.2f},{target_y:.2f})")
+                logger.info(f"{self.name}: 📍 Robot attualmente a: ({current_pose['x']:.2f},{current_pose['y']:.2f})")
         
         # 🆕 Calcola distanza DIRETTAMENTE dalla posizione corrente
-        current_pose = self.blackboard.get("current_pose")
-        
-        # 🆕 Debug: verifica current_pose
-        if current_pose is None:
-            if logger:
-                logger.warn(f"{self.name}: ⚠️ current_pose è None!")
-            return py_trees.common.Status.FAILURE
-        
         dx = target_x - current_pose['x']
         dy = target_y - current_pose['y']
         distance = math.sqrt(dx**2 + dy**2)

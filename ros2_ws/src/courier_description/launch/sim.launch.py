@@ -58,7 +58,7 @@ def generate_launch_description():
 
             '-string', robot_desc,
 
-            '-x', '0.5', '-y', '0.5', '-z', '0.1'
+            '-x', '0.5', '-y', '0.5', '-z', '0.1'  # Row 0, Col 0
 
         ],
 

@@ -1,0 +1,87 @@
+# --- ROS 2 Standard Ignored ---
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+ros2_ws/.colcon/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- VS Code & Editor Settings ---
+.vscode/
+.idea/
+*.swp
+*~
+*.bak
+
+# --- System Files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Docker ---
+docker_data/
+*.dockerignore
+
+# --- Gazebo ---
+*.log
+.gazebo/
+
+# --- ROS Specific ---
+*.bag
+*.db3
+devel/
+devel_isolated/
+.catkin_workspace
+
+# --- Build Artifacts ---
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.out
+
+# --- Testing ---
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# --- Temporary Files ---
+*.tmp
+*.temp
+*~
+
+# --- Package Manager ---
+node_modules/
+package-lock.json
+
+# --- Spurious pip files ---
+=*
+
+# --- Keep Important Files ---
+!ros2_ws/src/

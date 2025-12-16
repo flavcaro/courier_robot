@@ -76,8 +76,10 @@ class WorldSpawner(Node):
         
         for r in range(rows):
             for c in range(cols):
-                x = (r + 0.5) * self.cell_size
-                y = (c + 0.5) * self.cell_size
+                # 🔄 SWAP X and Y for Gazebo coordinate system
+                # Gazebo: -x is forward/back (row), -y is left/right (col)
+                x = (r + 0.5) * self.cell_size  # Row → X in Gazebo
+                y = (c + 0.5) * self.cell_size  # Column → Y in Gazebo
                 
                 if self.grid_map[r][c] == 1:
                     # Ostacoli CON collisioni ma PIÙ PICCOLI per lasciare spazio al robot
