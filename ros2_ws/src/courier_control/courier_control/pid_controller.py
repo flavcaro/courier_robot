@@ -88,6 +88,20 @@ class PIDController(Node):
         dy = ty - self.current_pose['y']
         distance = math.sqrt(dx**2 + dy**2)
         
+        # 🆕 LOG DEBUG
+        if not hasattr(self, '_last_debug_time'):
+            import time
+            self._last_debug_time = time.time()
+        
+        import time
+        if time.time() - self._last_debug_time > 1.0:  # Ogni secondo
+            self.get_logger().info(
+                f"🤖 Pos: ({self.current_pose['x']:.2f}, {self.current_pose['y']:.2f}) | "
+                f"Target: ({tx:.2f}, {ty:.2f}) | "
+                f"Dist: {distance:.2f}m"
+            )
+            self._last_debug_time = time.time()
+        
         # Target raggiunto?
         if distance < self.target_reached_threshold:
             self.get_logger().info(f'✅ Target raggiunto: ({tx:.2f}, {ty:.2f})')

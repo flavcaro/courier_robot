@@ -191,13 +191,13 @@ class LoadGridBFS(py_trees.behaviour.Behaviour):
         
         if not path:
             if logger:
-                logger.error(f"{self.name}: No path found from {start_cell} to {goal_cell}!")
+                logger.error(f"{self.name}: ❌ No path found from {start_cell} to {goal_cell}!")
             return Status.FAILURE
         
         self.blackboard.set("path_queue", path)
         
         if logger:
-            logger.info(f"{self.name}: Path computed = {len(path)} waypoints: {path}")
+            logger.info(f"{self.name}: ✅ Path computed = {len(path)} waypoints: {path}")
         
         return Status.SUCCESS
 
@@ -313,72 +313,6 @@ class RemoveReachedWaypoint(py_trees.behaviour.Behaviour):
         return Status.SUCCESS
 
 
-class NavigateAllWaypoints(py_trees.behaviour.Behaviour):
-    """Navigate through all waypoints in path_queue"""
-    def __init__(self, name="NavigateAllWaypoints"):
-        super().__init__(name)
-        self.blackboard = self.attach_blackboard_client(name=self.name)
-        self.blackboard.register_key(key="path_queue", access=py_trees.common.Access.WRITE)
-        self.blackboard.register_key(key="target_publisher", access=py_trees.common.Access.READ)
-        self.blackboard.register_key(key="cell_size", access=py_trees.common.Access.READ)
-        self.blackboard.register_key(key="distance_to_target", access=py_trees.common.Access.READ)
-        self.blackboard.register_key(key="logger", access=py_trees.common.Access.READ)
-        self.target_tolerance = 0.15
-    
-    def update(self):
-        path = self.blackboard.get("path_queue")
-        logger = self.blackboard.get("logger")
-        
-        # Check if path complete
-        if not path or len(path) == 0:
-            if logger:
-                logger.info(f"{self.name}: ✅ Tutti i waypoint raggiunti!")
-            return Status.SUCCESS
-        
-        # Get current waypoint
-        current_waypoint = path[0]
-        row, col = current_waypoint
-        
-        # Convert to world coordinates
-        cell_size = self.blackboard.get("cell_size")
-        target_x = (col + 0.5) * cell_size
-        target_y = (row + 0.5) * cell_size
-        
-        # Check if waypoint reached
-        distance = self.blackboard.get("distance_to_target")
-        
-        if distance <= self.target_tolerance:
-            # Waypoint reached, remove it
-            path.pop(0)
-            self.blackboard.set("path_queue", path)
-            
-            if logger:
-                logger.info(f"{self.name}: ✅ Waypoint Cell({row},{col}) raggiunto! {len(path)} rimanenti")
-            
-            # If more waypoints, continue to next
-            if len(path) > 0:
-                return Status.RUNNING
-            else:
-                return Status.SUCCESS
-        else:
-            # Still navigating to current waypoint
-            target_pub = self.blackboard.get("target_publisher")
-            if target_pub:
-                target_pub(target_x, target_y)
-            
-            if logger and hasattr(self, '_last_log_time'):
-                import time
-                if time.time() - self._last_log_time > 2.0:  # Log ogni 2 secondi
-                    logger.info(f"{self.name}: 📍 Navigando verso Cell({row},{col}) = ({target_x:.2f},{target_y:.2f}), distanza={distance:.2f}m")
-                    self._last_log_time = time.time()
-            elif not hasattr(self, '_last_log_time'):
-                import time
-                self._last_log_time = time.time()
-                if logger:
-                    logger.info(f"{self.name}: 🚀 Inizio navigazione verso Cell({row},{col})")
-            
-            return Status.RUNNING
-
 
 # ============================================================================
 # TREE BUILDER
@@ -455,3 +389,108 @@ def create_mission_behavior_tree():
     root.add_child(mission)
     
     return root
+
+class NavigateAllWaypoints(py_trees.behaviour.Behaviour):
+    """Navigate through all waypoints in path_queue"""
+    def __init__(self, name="NavigateAllWaypoints"):
+        super().__init__(name)
+        self.blackboard = self.attach_blackboard_client(name=self.name)
+        self.blackboard.register_key(key="path_queue", access=py_trees.common.Access.WRITE)
+        self.blackboard.register_key(key="target_publisher", access=py_trees.common.Access.READ)
+        self.blackboard.register_key(key="cell_size", access=py_trees.common.Access.READ)
+        self.blackboard.register_key(key="current_pose", access=py_trees.common.Access.READ)  # 🆕
+        self.blackboard.register_key(key="logger", access=py_trees.common.Access.READ)
+        self.target_tolerance = 0.15
+        self.current_target_world = None  # 🆕 Salva il target in coordinate mondo
+    
+    def update(self):
+        import math  # 🆕
+        
+        path = self.blackboard.get("path_queue")
+        logger = self.blackboard.get("logger")
+        
+        # Check if path complete
+        if not path or len(path) == 0:
+            if logger:
+                logger.info(f"{self.name}: ✅ Tutti i waypoint raggiunti!")
+            return py_trees.common.Status.SUCCESS
+        
+        # Get current waypoint
+        current_waypoint = path[0]
+        row, col = current_waypoint
+        
+        # Convert to world coordinates
+        cell_size = self.blackboard.get("cell_size")
+        target_x = (col + 0.5) * cell_size  # ✅ col → X
+        target_y = (row + 0.5) * cell_size  # ✅ row → Y
+        
+        # 🆕 Se è un nuovo target, pubblicalo
+        if self.current_target_world != (target_x, target_y):
+            self.current_target_world = (target_x, target_y)
+            
+            # Pubblica target per PID
+            target_pub = self.blackboard.get("target_publisher")
+            if target_pub:
+                target_pub(target_x, target_y)
+            
+            if logger:
+                logger.info(f"{self.name}: 🚀 Nuovo waypoint: Cell({row},{col}) → World({target_x:.2f},{target_y:.2f})")
+        
+        # 🆕 Calcola distanza DIRETTAMENTE dalla posizione corrente
+        current_pose = self.blackboard.get("current_pose")
+        
+        # 🆕 Debug: verifica current_pose
+        if current_pose is None:
+            if logger:
+                logger.warn(f"{self.name}: ⚠️ current_pose è None!")
+            return py_trees.common.Status.FAILURE
+        
+        dx = target_x - current_pose['x']
+        dy = target_y - current_pose['y']
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        # Log periodicamente per debug
+        if not hasattr(self, '_last_log_time'):
+            import time
+            self._last_log_time = time.time()
+        
+        import time
+        if time.time() - self._last_log_time > 1.0:  # Ogni secondo
+            if logger:
+                logger.info(
+                    f"{self.name}: 📏 Cell({row},{col}): "
+                    f"Robot@({current_pose['x']:.3f},{current_pose['y']:.3f}) → "
+                    f"Target@({target_x:.2f},{target_y:.2f}) = "
+                    f"dist={distance:.3f}m (tol={self.target_tolerance}m)"
+                )
+            self._last_log_time = time.time()
+        
+        # Check if waypoint reached
+        if distance <= self.target_tolerance:
+            # Waypoint reached, remove it
+            path.pop(0)
+            self.blackboard.set("path_queue", path)
+            self.current_target_world = None  # 🆕 Reset per prossimo waypoint
+            
+            if logger:
+                logger.info(f"{self.name}: ✅ Waypoint Cell({row},{col}) raggiunto! {len(path)} rimanenti")
+            
+            # If more waypoints, continue to next
+            if len(path) > 0:
+                return py_trees.common.Status.RUNNING
+            else:
+                if logger:
+                    logger.info(f"{self.name}: 🎉 Missione completata!")
+                return py_trees.common.Status.SUCCESS
+        else:
+            # Still navigating to current waypoint
+            if logger and hasattr(self, '_last_log_time'):
+                import time
+                if time.time() - self._last_log_time > 2.0:  # Log ogni 2 secondi
+                    logger.info(f"{self.name}: 📍 Navigando verso Cell({row},{col}) = ({target_x:.2f},{target_y:.2f}), distanza={distance:.2f}m")
+                    self._last_log_time = time.time()
+            elif not hasattr(self, '_last_log_time'):
+                import time
+                self._last_log_time = time.time()
+            
+            return py_trees.common.Status.RUNNING

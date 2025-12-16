@@ -97,9 +97,25 @@ class MissionController(Node):
     
     def odom_callback(self, msg):
         """Update current pose from odometry"""
+        old_x = self.current_pose['x']
+        old_y = self.current_pose['y']
+        
         self.current_pose['x'] = msg.pose.pose.position.x
         self.current_pose['y'] = msg.pose.pose.position.y
         # TODO: Extract theta from quaternion
+        
+        # Log quando la posizione cambia significativamente
+        if not hasattr(self, '_last_odom_log_time'):
+            import time
+            self._last_odom_log_time = time.time()
+        
+        import time
+        movement = ((self.current_pose['x'] - old_x)**2 + (self.current_pose['y'] - old_y)**2)**0.5
+        if movement > 0.1 or time.time() - self._last_odom_log_time > 5.0:  # Ogni 10cm o 5 secondi
+            self.get_logger().info(
+                f"📍 Odometria: ({self.current_pose['x']:.3f}, {self.current_pose['y']:.3f})"
+            )
+            self._last_odom_log_time = time.time()
         
         # Update distance to target in blackboard
         if hasattr(self, 'current_target'):
@@ -167,9 +183,15 @@ class MissionController(Node):
             if self.current_pose['x'] != 0.0 or self.current_pose['y'] != 0.0:
                 self.system_ready = True
                 self.blackboard.set("system_ready", True)
+                
+                # 🆕 LOG per confermare
+                self.get_logger().info(
+                    f"✅ Sistema pronto! Posizione iniziale: "
+                    f"({self.current_pose['x']:.2f}, {self.current_pose['y']:.2f})"
+                )
             return
         
-        # Update blackboard with current pose
+        # 🆕 Update blackboard with current pose SEMPRE
         self.blackboard.set("current_pose", self.current_pose)
         
         # Tick the behavior tree

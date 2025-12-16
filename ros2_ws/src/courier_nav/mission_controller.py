@@ -24,7 +24,13 @@ class MissionController(Node):
         self.target_pub = self.create_publisher(PoseStamped, '/target_pose', 10)
         
         # Subscribers
-        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        # 🆕 IMPORTANTE: Subscriber per odometry
+        self.odom_sub = self.create_subscription(
+            Odometry, 
+            '/odom', 
+            self.odom_callback, 
+            10
+        )
         
         # Current state
         self.current_pose = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -57,6 +63,16 @@ class MissionController(Node):
         self.current_pose['x'] = msg.pose.pose.position.x
         self.current_pose['y'] = msg.pose.pose.position.y
         # TODO: Extract theta from quaternion
+    
+        # 🆕 LOG periodico per debug
+        if not hasattr(self, '_last_odom_log'):
+            import time
+            self._last_odom_log = time.time()
+        
+        import time
+        if time.time() - self._last_odom_log > 5.0:  # Ogni 5 secondi
+            self.get_logger().info(f"📍 Odometria: ({self.current_pose['x']:.2f}, {self.current_pose['y']:.2f})")
+            self._last_odom_log = time.time()
     
     def publish_target(self, target_x, target_y):
         """Publish target pose for PID controller"""
