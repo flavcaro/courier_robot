@@ -1,0 +1,37 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+    <model name='apriltag_marker'>
+        <static>true</static>
+        <pose>3.5 0 0.3 0 0 0</pose>
+        <link name='marker_link'>
+            <visual name='marker_visual'>
+                <geometry>
+                    <box>
+                        <size>0.2 0.001 0.2</size>
+                    </box>
+                </geometry>
+                <material>
+                    <ambient>1 1 1 1</ambient>
+                    <diffuse>1 1 1 1</diffuse>
+                    <emissive>0.2 0.2 0.2 1</emissive>
+                </material>
+            </visual>
+            <visual name='tag_visual'>
+                <pose>0 -0.001 0 0 0 0</pose>
+                <geometry>
+                    <box>
+                        <size>0.15 0.001 0.15</size>
+                    </box>
+                </geometry>
+                <material>
+                    <ambient>0 0 0 1</ambient>
+                    <diffuse>0 0 0 1</diffuse>
+                    <script>
+                        <uri>model://apriltag_36h11</uri>
+                        <name>tag36_11_00000</name>
+                    </script>
+                </material>
+            </visual>
+        </link>
+    </model>
+</sdf>

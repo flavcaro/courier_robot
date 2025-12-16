@@ -1,0 +1,25 @@
+# ros2_ws/src/courier_control/courier_control/pid_controller.py
+````python
+class PIDController(Node):
+    def __init__(self):
+        super().__init__('pid_controller')
+        
+        # PID gains
+        self.kp_linear = 0.5
+        self.ki_linear = 0.0
+        self.kd_linear = 0.1
+        
+        self.kp_angular = 1.0
+        self.ki_angular = 0.0
+        self.kd_angular = 0.2
+        
+        # Subscriber per i target
+        self.create_subscription(
+            PoseStamped, 
+            '/target_pose', 
+            self.target_callback, 
+            10
+        )
+        
+        # Publisher per /cmd_vel
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
