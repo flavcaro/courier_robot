@@ -1,0 +1,47 @@
+flowchart TD
+    ROOT([ROOT])
+
+    %% ===== MISSION SEQUENCE =====
+    ROOT --> MISSION_SEQ{{Sequence: Mission}}
+
+    MISSION_SEQ --> INIT
+    MISSION_SEQ --> GO_TARGET
+    MISSION_SEQ --> PICKUP
+    MISSION_SEQ --> RETURN_BASE
+    MISSION_SEQ --> RELEASE
+    MISSION_SEQ --> END
+
+    %% ===== INIT =====
+    INIT{{Sequence: Init}}
+    INIT --> SYS_READY{System Ready?}
+    INIT --> INIT_SENS[Init Sensors]
+    INIT --> ARM_HOME[Arm → HOME]
+    INIT --> LOAD_GRID[Load Grid & BFS]
+
+    %% ===== NAVIGATE TO TARGET =====
+    GO_TARGET{{Sequence: Go To Target}}
+    GO_TARGET --> TARGET_REACHED{At Target?}
+    GO_TARGET --> NAVIGATE[Follow BFS Path]
+    GO_TARGET --> ALIGN_TAG[Align with AprilTag]
+
+    %% ===== PICKUP =====
+    PICKUP{{Sequence: Pickup}}
+    PICKUP --> ARM_GRIP[Arm → GRIP]
+    PICKUP --> CLOSE_GRIPPER[Close Gripper]
+    PICKUP --> GRASP_OK{Object Secured?}
+    PICKUP --> ARM_CARRY[Arm → CARRY]
+
+    %% ===== RETURN TO BASE =====
+    RETURN_BASE{{Sequence: Return}}
+    RETURN_BASE --> BASE_REACHED{At Base?}
+    RETURN_BASE --> NAVIGATE_BACK[Follow Return Path]
+    RETURN_BASE --> ALIGN_BASE[Align at Base]
+
+    %% ===== RELEASE =====
+    RELEASE{{Sequence: Release}}
+    RELEASE --> ARM_RELEASE[Arm → RELEASE]
+    RELEASE --> OPEN_GRIPPER[Open Gripper]
+    RELEASE --> ARM_HOME_END[Arm → HOME]
+
+    %% ===== END =====
+    END([Complete])
