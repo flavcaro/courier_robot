@@ -1,0 +1,8 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting py_trees
+  Downloading py_trees-2.4.0-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: pydot>=1.4 in /usr/lib/python3/dist-packages (from py_trees) (1.4.2)
+Downloading py_trees-2.4.0-py3-none-any.whl (114 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.1/114.1 kB 466.8 kB/s eta 0:00:00
+Installing collected packages: py_trees
+Successfully installed py_trees-2.4.0

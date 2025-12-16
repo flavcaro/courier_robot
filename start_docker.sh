@@ -24,6 +24,10 @@ sleep 5
 ros2 run courier_nav spawner &
 sleep 3
 
+echo "🤖 Spawning robot..."
+ros2 run ros_gz_sim create -world empty -file /home/ubuntu/ros2_ws/robot.sdf -name courier_robot -x 0.5 -y 0.5 -z 0.15
+sleep 2
+
 ros2 run courier_control pid_controller &
 sleep 2
 
