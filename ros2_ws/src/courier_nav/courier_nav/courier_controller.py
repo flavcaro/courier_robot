@@ -41,8 +41,12 @@ class CourierController(Node):
         self.current_pose = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.current_target = None
         
-        # Initialize robot position and orientation
-        self.robot_position = (0.0, 0.0)
+        # Robot spawn offset - robot spawns at center of cell (0,0)
+        self.spawn_offset_x = 0.5
+        self.spawn_offset_y = 0.5
+        
+        # Initialize robot position and orientation (world coordinates)
+        self.robot_position = (self.spawn_offset_x, self.spawn_offset_y)
         self.robot_yaw = 0.0
         
         # --- Calcolo Percorso ---
@@ -155,6 +159,10 @@ class CourierController(Node):
             key="aligned_at_turn",
             access=py_trees.common.Access.WRITE
         )
+        self.blackboard.register_key(
+            key="initial_alignment_done",
+            access=py_trees.common.Access.WRITE
+        )
         
         # Set initial blackboard values
         self.blackboard.set("battery_level", 100.0)  # Start with full battery
@@ -173,6 +181,7 @@ class CourierController(Node):
         self.blackboard.set("robot_position", self.robot_position)  # Current robot position
         self.blackboard.set("robot_yaw", self.robot_yaw)  # Current robot orientation
         self.blackboard.set("aligned_at_turn", False)  # Not yet aligned at turn point 
+        self.blackboard.set("initial_alignment_done", False)  # Enforce strict alignment on first move
 
     def publish_markers(self):
         """Disegna la griglia, start, goal e ostacoli in RViz"""
@@ -250,6 +259,7 @@ class CourierController(Node):
         self.marker_pub.publish(marker_array)
 
     def odom_callback(self, msg):
+        self._odom_received = True
         self.current_pose['x'] = msg.pose.pose.position.x
         self.current_pose['y'] = msg.pose.pose.position.y
         orientation_q = msg.pose.pose.orientation
@@ -263,14 +273,22 @@ class CourierController(Node):
     
     def update_blackboard_state(self):
         """Update blackboard with current state information."""
+        # Update robot position and yaw from odometry (add spawn offset for world coordinates)
+        world_x = self.current_pose['x'] + self.spawn_offset_x
+        world_y = self.current_pose['y'] + self.spawn_offset_y
+        self.robot_position = (world_x, world_y)
+        self.robot_yaw = self.current_pose['theta']
+        self.blackboard.set("robot_position", self.robot_position)
+        self.blackboard.set("robot_yaw", self.robot_yaw)
+        
         # Get current target from blackboard
         current_target = self.blackboard.get("current_target")
         
         if current_target is not None:
-            # Calculate distance and angle to target
+            # Calculate distance and angle to target (using world coordinates)
             tx, ty = current_target
-            dx = tx - self.current_pose['x']
-            dy = ty - self.current_pose['y']
+            dx = tx - world_x
+            dy = ty - world_y
             distance = math.sqrt(dx**2 + dy**2)
             target_angle = math.atan2(dy, dx)
             angle_diff = target_angle - self.current_pose['theta']
@@ -290,7 +308,8 @@ class CourierController(Node):
 
     def control_loop(self):
         if not self.robot_initialized:
-            if (self.current_pose['x'] != 0.0 or self.current_pose['y'] != 0.0):
+            # Initialize after first odometry received (even at 0,0)
+            if hasattr(self, '_odom_received') and self._odom_received:
                 self.robot_initialized = True
                 self.get_logger().info(f'Robot inizializzato a: pos=({self.current_pose["x"]:.2f}, {self.current_pose["y"]:.2f}) theta={self.current_pose["theta"]:.2f} rad')
             return
@@ -307,9 +326,14 @@ class CourierController(Node):
         self._tree_log_counter += 1
         if self._tree_log_counter % 100 == 0:  # Every 10 seconds
             battery = self.blackboard.get("battery_level")
-            self.get_logger().info(f'🔋 Battery: {battery:.1f}%')
-            # Uncomment to see tree structure:
-            # self.get_logger().info(f'\n{py_trees.display.unicode_tree(self.behavior_tree, show_status=True)}')
+            target = self.blackboard.get("current_target")
+            angle_diff = self.blackboard.get("angle_diff")
+            distance = self.blackboard.get("distance_to_target")
+            pos = self.blackboard.get("robot_position")
+            yaw = self.blackboard.get("robot_yaw")
+            self.get_logger().info(f'🔋 Battery: {battery:.1f}% | Pos: ({pos[0]:.2f}, {pos[1]:.2f}) | Yaw: {yaw:.2f} rad')
+            if target:
+                self.get_logger().info(f'🎯 Target: ({target[0]:.2f}, {target[1]:.2f}) | Dist: {distance:.2f}m | Angle: {angle_diff:.2f} rad')
 
     def bfs_path_planner(self, start_cell, goal_cell):
         rows = len(self.grid_map)

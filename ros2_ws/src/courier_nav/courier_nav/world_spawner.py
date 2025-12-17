@@ -96,31 +96,32 @@ class WorldSpawner(Node):
     
     def spawn_apriltag_marker(self):
         """Spawn an AprilTag marker at cell (4,0) for return path navigation"""
-        goal_x = (self.goal_cell[0] + 0.5) * self.cell_size
-        goal_y = (self.goal_cell[1] + 0.5) * self.cell_size
-        
-        # Position marker at cell (4,0) - the turn point
-        # The marker should be at (4.5, 0.5) facing north so robot sees it during return
-        marker_x = 4.5
-        marker_y = 0.5
+        marker_x = 4.5   # bordo destro della cella (4,0)
+        marker_y = 0.25  # parte bassa della cella
         marker_z = 0.5
         
-        # Marker verticale che punta verso nord (robot al goal lo vede guardando sud)
+        # Marker verticale con faccia lungo +X ruotata di +90° (front verso nord)
         sdf_content = """<?xml version='1.0'?>
         <sdf version='1.6'>
           <model name='apriltag_marker'>
             <static>true</static>
+            <pose>0 0 0 0 0 1.5708</pose>
             <link name='link'>
               <visual name='board_visual'>
-                <geometry><box><size>0.3 0.02 0.3</size></box></geometry>
+                <geometry>
+                  <box><size>0.3 0.02 0.3</size></box>
+                </geometry>
                 <material>
                   <ambient>1 1 1 1</ambient>
                   <diffuse>1 1 1 1</diffuse>
                 </material>
               </visual>
+
               <visual name='tag_visual'>
-                <pose>0 0.011 0 0 0 0</pose>
-                <geometry><box><size>0.2 0.001 0.2</size></box></geometry>
+                <pose>0.151 0 0 0 0 0</pose>
+                <geometry>
+                  <box><size>0.001 0.2 0.2</size></box>
+                </geometry>
                 <material>
                   <ambient>0 0 0 1</ambient>
                   <diffuse>0 0 0 1</diffuse>
@@ -130,14 +131,13 @@ class WorldSpawner(Node):
           </model>
         </sdf>"""
         
-        # Position marker at (4.5, 1.5) facing north (Y=0 rotation)
+        # Position marker at (4.5, 0.25) facing north via model pose (yaw = +pi/2)
         cmd = [
             "ros2", "run", "ros_gz_sim", "create",
             "-world", "empty",
             "-name", "apriltag_marker",
             "-string", sdf_content,
-            "-x", str(marker_x), "-y", str(marker_y), "-z", str(marker_z),
-            "-Y", "0"  # Face north
+            "-x", str(marker_x), "-y", str(marker_y), "-z", str(marker_z)
         ]
         
         subprocess.Popen(cmd)
@@ -149,22 +149,27 @@ class WorldSpawner(Node):
         start_x = (self.start_cell[0] + 0.5) * self.cell_size
         start_y = (self.start_cell[1] + 0.5) * self.cell_size
         
-        # Marker verticale alla start position, guarda verso est
+        # Marker verticale alla start position, front lungo +X (guarda est)
         sdf_content = """<?xml version='1.0'?>
         <sdf version='1.6'>
           <model name='start_apriltag_marker'>
             <static>true</static>
+            <pose>0 0 0 0 0 0</pose>
             <link name='link'>
               <visual name='board_visual'>
-                <geometry><box><size>0.3 0.02 0.3</size></box></geometry>
+                <geometry>
+                  <box><size>0.3 0.02 0.3</size></box>
+                </geometry>
                 <material>
                   <ambient>0 1 0 1</ambient>
                   <diffuse>0 1 0 1</diffuse>
                 </material>
               </visual>
               <visual name='tag_visual'>
-                <pose>0 0.011 0 0 0 0</pose>
-                <geometry><box><size>0.2 0.001 0.2</size></box></geometry>
+                <pose>0.151 0 0 0 0 0</pose>
+                <geometry>
+                  <box><size>0.001 0.2 0.2</size></box>
+                </geometry>
                 <material>
                   <ambient>0 0 0 1</ambient>
                   <diffuse>0 0 0 1</diffuse>
@@ -174,7 +179,7 @@ class WorldSpawner(Node):
           </model>
         </sdf>"""
         
-        # Position marker west of start, facing east
+        # Position marker west of start, facing east via model pose
         marker_x = start_x - 0.3
         marker_y = start_y
         marker_z = 0.5
@@ -184,8 +189,7 @@ class WorldSpawner(Node):
             "-world", "empty",
             "-name", "start_apriltag_marker",
             "-string", sdf_content,
-            "-x", str(marker_x), "-y", str(marker_y), "-z", str(marker_z),
-            "-Y", "1.5708"  # Face east (90 degrees)
+            "-x", str(marker_x), "-y", str(marker_y), "-z", str(marker_z)
         ]
         
         subprocess.Popen(cmd)

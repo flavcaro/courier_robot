@@ -3,6 +3,6 @@ Collecting py_trees
   Downloading py_trees-2.4.0-py3-none-any.whl.metadata (13 kB)
 Requirement already satisfied: pydot>=1.4 in /usr/lib/python3/dist-packages (from py_trees) (1.4.2)
 Downloading py_trees-2.4.0-py3-none-any.whl (114 kB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.1/114.1 kB 2.8 MB/s eta 0:00:00
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.1/114.1 kB 3.5 MB/s eta 0:00:00
 Installing collected packages: py_trees
 Successfully installed py_trees-2.4.0

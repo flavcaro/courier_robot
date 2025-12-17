@@ -168,6 +168,10 @@ class IsAligned(py_trees.behaviour.Behaviour):
             key="logger",
             access=py_trees.common.Access.READ
         )
+        self.blackboard.register_key(
+            key="initial_alignment_done",
+            access=py_trees.common.Access.READ
+        )
     
     def setup(self, **kwargs):
         """Setup the behavior (called once before first tick)."""
@@ -182,10 +186,16 @@ class IsAligned(py_trees.behaviour.Behaviour):
         """
         angle_diff = self.blackboard.get("angle_diff")
         return_planned = self.blackboard.get("return_planned")
+        initial_alignment_done = self.blackboard.get("initial_alignment_done")
         logger = self.blackboard.get("logger")
         
-        # Durante il ritorno, usa tolleranza MOLTO più stretta
-        tolerance = 0.015 if return_planned else self.angle_tolerance  # 0.86° vs 2.86°
+        # Use appropriate tolerance based on phase
+        if not initial_alignment_done:
+            tolerance = 0.02  # ~1.15° for first alignment
+        elif return_planned:
+            tolerance = 0.03  # ~1.7° for return path
+        else:
+            tolerance = 0.05  # ~2.9° for normal navigation
         
         if abs(angle_diff) <= tolerance:
             if logger and return_planned:
@@ -206,7 +216,7 @@ class IsAtTarget(py_trees.behaviour.Behaviour):
     Condition node that checks if the robot reached the target.
     """
     
-    def __init__(self, name="IsAtTarget", dist_tolerance=0.15):
+    def __init__(self, name="IsAtTarget", dist_tolerance=0.10):
         """
         Initialize the target distance checker.
         
@@ -238,7 +248,7 @@ class IsAtTarget(py_trees.behaviour.Behaviour):
         
         # Richiedi che il robot vada leggermente OLTRE il centro (tolleranza negativa simulata)
         # Usa una tolleranza più stretta per forzare ad arrivare più vicino
-        if distance <= 0.02:  # 2cm - molto stretto
+        if distance <= self.dist_tolerance:
             self.feedback_message = f"At target: {distance:.3f} m"
             return Status.SUCCESS
         else:
@@ -251,7 +261,7 @@ class IsAtGoal(py_trees.behaviour.Behaviour):
     Condition node that checks if the robot is at the final goal (but hasn't collected yet).
     """
     
-    def __init__(self, name="IsAtGoal"):
+    def __init__(self, name="IsAtGoal", goal_tolerance=0.20, cell_size=1.0):
         """
         Initialize the goal checker.
         
@@ -259,6 +269,8 @@ class IsAtGoal(py_trees.behaviour.Behaviour):
             name: Name of the behavior
         """
         super(IsAtGoal, self).__init__(name)
+        self.goal_tolerance = goal_tolerance
+        self.cell_size = cell_size
         self.feedback_message = ""
         self.blackboard = self.attach_blackboard_client(name=self.name)
         self.blackboard.register_key(
@@ -271,6 +283,14 @@ class IsAtGoal(py_trees.behaviour.Behaviour):
         )
         self.blackboard.register_key(
             key="object_collected",
+            access=py_trees.common.Access.READ
+        )
+        self.blackboard.register_key(
+            key="robot_position",
+            access=py_trees.common.Access.READ
+        )
+        self.blackboard.register_key(
+            key="goal_cell",
             access=py_trees.common.Access.READ
         )
     
@@ -288,13 +308,16 @@ class IsAtGoal(py_trees.behaviour.Behaviour):
         path_queue = self.blackboard.get("path_queue")
         current_target = self.blackboard.get("current_target")
         object_collected = self.blackboard.get("object_collected")
-        
-        # At goal if no waypoints, no target, and object NOT yet collected
-        if (not path_queue or len(path_queue) == 0) and current_target is None and not object_collected:
-            self.feedback_message = "At final goal"
+        robot_pos = self.blackboard.get("robot_position")
+        goal_cell = self.blackboard.get("goal_cell")
+        goal_xy = ((goal_cell[0] + 0.5) * self.cell_size, (goal_cell[1] + 0.5) * self.cell_size)
+        dist_goal = ((robot_pos[0]-goal_xy[0])**2 + (robot_pos[1]-goal_xy[1])**2) ** 0.5
+
+        if (not path_queue or len(path_queue) == 0) and current_target is None and not object_collected and dist_goal <= self.goal_tolerance:
+            self.feedback_message = f"At final goal (dist {dist_goal:.2f} m)"
             return Status.SUCCESS
         else:
-            self.feedback_message = "Not at goal yet"
+            self.feedback_message = f"Not at goal yet (dist {dist_goal:.2f} m)"
             return Status.FAILURE
 
 
@@ -443,7 +466,7 @@ class AlignForReturn(py_trees.behaviour.Behaviour):
         
         if logger:
             import math
-            logger.info(f'🎯 INIZIO allineamento verso AprilTag in posizione (4.1, 0)')
+            logger.info(f'🎯 INIZIO allineamento verso AprilTag in posizione (4.5, 0.25)')
             logger.info(f'  Posizione attuale: ({robot_pos[0]:.2f}, {robot_pos[1]:.2f})')
             logger.info(f'  Orientamento attuale: {robot_yaw*180/math.pi:.1f}°')
     
@@ -470,9 +493,9 @@ class AlignForReturn(py_trees.behaviour.Behaviour):
                 logger.warn('⚠️ Timeout allineamento, procedo comunque')
             return Status.SUCCESS
         
-        # Allinea verso la posizione fissa 3.5, 0 dove si trova l'AprilTag
-        target_x = 3.5
-        target_y = 0.0
+        # Allinea verso il marker AprilTag di ritorno al centro della cella (4,0)
+        target_x = 4.5
+        target_y = 0.25
         
         if logger and not self.aligned:
             logger.info(f'📍 Target allineamento verso AprilTag in posizione fissa: ({target_x:.2f}, {target_y:.2f})')
@@ -498,7 +521,7 @@ class AlignForReturn(py_trees.behaviour.Behaviour):
                 self.stabilizing = True
                 self.stabilize_start = time.time()
                 if logger:
-                    logger.info(f'✅ PERFETTAMENTE allineato verso AprilTag in (4.1, 0)')
+                    logger.info(f'✅ PERFETTAMENTE allineato verso AprilTag in (4.5, 0.5)')
                     logger.info(f'   Errore angolare: {abs(angle_diff)*180/math.pi:.3f}°')
                     logger.info(f'   Angolo robot: {robot_yaw*180/math.pi:.1f}° → Target: {target_angle*180/math.pi:.1f}°')
                     logger.info(f'⏸️ Stabilizzazione per {self.stabilize_time}s...')
@@ -609,11 +632,11 @@ class GetNextTarget(py_trees.behaviour.Behaviour):
         target_x = (next_cell[0] + 0.5) * self.cell_size
         target_y = (next_cell[1] + 0.5) * self.cell_size
         
-        # Special case: during return, position (4,0) target lower in the cell to avoid collision
+        # Special case: during return, position (4,0) target al centro della cella per allinearsi al tag
         if return_planned and next_cell == (4, 0):
-            target_y = 0.25  # Move toward bottom of cell (was 0.5)
+            target_y = 0.25
             if logger:
-                logger.info(f'🎯 Target (4,0) spostato in basso a y=0.25 per evitare collisioni')
+                logger.info(f'🎯 Target (4,0) centrato a y=0.25 per allinearsi al tag')
         
         # Special case: final target (0,0) should be at left edge, centered vertically
         if return_planned and next_cell == (0, 0):
@@ -740,34 +763,40 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
     
     def update(self):
         """
-        Move toward target.
-        
-        Returns:
-            Status.RUNNING while moving
+        Move toward target with axis-aligned correction.
         """
         distance = self.blackboard.get("distance_to_target")
         angle_diff = self.blackboard.get("angle_diff")
         battery_level = self.blackboard.get("battery_level")
         cmd_vel_pub = self.blackboard.get("cmd_vel_publisher")
         
-        # Consume battery
         new_level = max(0.0, battery_level - self.battery_cost * 0.1)
         self.blackboard.set("battery_level", new_level)
         
-        # Publish movement command
         if cmd_vel_pub:
             from geometry_msgs.msg import Twist
             msg = Twist()
-            # Velocità proporzionale alla distanza
-            speed = max(0.1, min(0.3, distance * 0.5))
-            msg.linear.x = speed
-            # Correzione angolare continua per mantenere la traiettoria
-            Kp_move = 2.0  # Controllo proporzionale durante movimento
-            msg.angular.z = max(min(Kp_move * angle_diff, 0.5), -0.5)
+            
+            # If significantly misaligned, stop and let RotateToTarget handle it
+            if abs(angle_diff) > 0.08:  # ~4.5° - stop for major corrections
+                msg.linear.x = 0.0
+                msg.angular.z = 0.0
+            else:
+                # Move forward with proportional angular correction to stay on axis
+                speed = max(0.08, min(0.25, distance * 0.5))
+                if distance < 0.10:  # Match IsAtTarget tolerance
+                    speed = 0.0
+                
+                msg.linear.x = speed
+                # Apply small angular correction while moving (proportional control)
+                Kp_angular = 1.5  # Proportional gain for course correction
+                msg.angular.z = Kp_angular * angle_diff
+                # Limit angular correction during movement
+                msg.angular.z = max(-0.3, min(0.3, msg.angular.z))
+            
             cmd_vel_pub(msg)
         
-        self.feedback_message = f"Moving: {distance:.3f} m"
-        
+        self.feedback_message = f"Moving: {distance:.3f} m, angle_diff: {angle_diff:.3f}"
         return Status.RUNNING
 
 
@@ -794,6 +823,10 @@ class ClearTarget(py_trees.behaviour.Behaviour):
             key="logger",
             access=py_trees.common.Access.READ
         )
+        self.blackboard.register_key(
+            key="initial_alignment_done",
+            access=py_trees.common.Access.WRITE
+        )
     
     def setup(self, **kwargs):
         """Setup the behavior (called once before first tick)."""
@@ -810,6 +843,8 @@ class ClearTarget(py_trees.behaviour.Behaviour):
         logger = self.blackboard.get("logger")
         
         self.blackboard.set("current_target", None)
+        # Mark initial alignment as done after the first target is cleared
+        self.blackboard.set("initial_alignment_done", True)
         
         self.feedback_message = f"Target cleared: {current_target}"
         
@@ -1075,7 +1110,11 @@ class PlanSimpleReturn(py_trees.behaviour.Behaviour):
         
         # Percorso di ritorno inizia da (4,0) dove c'è l'AprilTag, non da (4,1)
         # (4,2) → (4,0) → (3,0) → (2,0) → (1,0) → (0,0)
-        return_path = [(4, 0), (3, 0), (2, 0), (1, 0), (0, 0)]
+        # Inverte il percorso BFS originale così da ripercorrere le stesse celle (adiacenti) al ritorno
+        return_path = list(reversed(original_path))
+        if return_path and original_path:
+            # Salta la cella corrente (goal) perché ci siamo già
+            return_path.pop(0)
         
         self.blackboard.set("path_queue", return_path)
         self.blackboard.set("return_planned", True)
@@ -1252,7 +1291,7 @@ def create_courier_behavior_tree(cell_size=1.0):
     
     # Option A: Already at target - clear it
     reach_sequence = Sequence(name="Reach Target", memory=False)
-    is_at_target = IsAtTarget(name="IsAtTarget", dist_tolerance=0.03)
+    is_at_target = IsAtTarget(name="IsAtTarget", dist_tolerance=0.10)
     clear_target = ClearTarget(name="ClearTarget")
     reach_sequence.add_children([is_at_target, clear_target])
     
@@ -1261,11 +1300,12 @@ def create_courier_behavior_tree(cell_size=1.0):
     
     # First check alignment, then move
     rotation_selector = Selector(name="Rotation Check", memory=False)
-    is_aligned = IsAligned(name="IsAligned", angle_tolerance=0.05)  # 2.86° - buon compromesso
-    rotate_to_target = RotateToTarget(name="RotateToTarget", battery_cost=1.0)
+    # Tolleranza più stretta: ruota completamente prima di avanzare
+    is_aligned = IsAligned(name="IsAligned", angle_tolerance=0.05)
+    rotate_to_target = RotateToTarget(name="RotateToTarget", battery_cost=0.05)
     rotation_selector.add_children([is_aligned, rotate_to_target])
     
-    move_to_target = MoveToTarget(name="MoveToTarget", battery_cost=2.0)
+    move_to_target = MoveToTarget(name="MoveToTarget", battery_cost=0.1)
     
     move_sequence.add_children([rotation_selector, move_to_target])
     
@@ -1337,3 +1377,5 @@ def create_courier_behavior_tree(cell_size=1.0):
     root.add_children([battery_selector, mission_selector])
     
     return root
+
+
