@@ -68,7 +68,7 @@ class WorldSpawner(Node):
         
         # Esegue il comando senza bloccare troppo
         subprocess.Popen(cmd)
-        time.sleep(0.1) # Piccola pausa per non intasare Gazebo
+        time.sleep(0.2) # Pausa per non intasare Gazebo
 
     def spawn_world(self):
         rows = len(self.grid_map)
