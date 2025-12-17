@@ -777,22 +777,22 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             from geometry_msgs.msg import Twist
             msg = Twist()
             
-            # If significantly misaligned, stop and let RotateToTarget handle it
-            if abs(angle_diff) > 0.08:  # ~4.5° - stop for major corrections
+            # If misaligned, stop and let RotateToTarget handle it (stricter threshold)
+            if abs(angle_diff) > 0.05:  # ~2.9° - stricter to avoid drifting into obstacles
                 msg.linear.x = 0.0
                 msg.angular.z = 0.0
             else:
                 # Move forward with proportional angular correction to stay on axis
-                speed = max(0.08, min(0.25, distance * 0.5))
+                speed = max(0.08, min(0.20, distance * 0.4))  # Slower speed for precision
                 if distance < 0.10:  # Match IsAtTarget tolerance
                     speed = 0.0
                 
                 msg.linear.x = speed
-                # Apply small angular correction while moving (proportional control)
-                Kp_angular = 1.5  # Proportional gain for course correction
+                # Apply stronger angular correction while moving (proportional control)
+                Kp_angular = 2.5  # Increased gain for better course correction
                 msg.angular.z = Kp_angular * angle_diff
                 # Limit angular correction during movement
-                msg.angular.z = max(-0.3, min(0.3, msg.angular.z))
+                msg.angular.z = max(-0.4, min(0.4, msg.angular.z))
             
             cmd_vel_pub(msg)
         

@@ -81,8 +81,8 @@ class WorldSpawner(Node):
                 
                 if self.grid_map[r][c] == 1:
                     # Ostacoli CON collisioni ma PIÙ PICCOLI per lasciare spazio al robot
-                    # Robot è 0.4m x 0.4m, celle sono 1.0m, quindi ostacoli di 0.6m lasciano 0.4m di corridoio
-                    self.spawn_object(f"obs_{r}_{c}", x, y, 0.3, "Red", 0.6, 0.6, 0.6, with_collision=True)
+                    # Robot è 0.4m x 0.4m, celle sono 1.0m, quindi ostacoli di 0.5m lasciano 0.5m di corridoio
+                    self.spawn_object(f"obs_{r}_{c}", x, y, 0.3, "Red", 0.5, 0.5, 0.6, with_collision=True)
                 elif (r, c) == self.start_cell:
                     self.spawn_object("start", x, y, 0.01, "Green", self.cell_size*0.9, self.cell_size*0.9, 0.01, with_collision=False)
                 elif (r, c) == self.goal_cell:
