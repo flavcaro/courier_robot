@@ -32,22 +32,36 @@ class Nav2MissionController(Node):
         # === Configuration ===
         self.cell_size = 1.0  # meters per grid cell
         
-        # Grid map (0=free, 1=obstacle)
-        self.grid_map = [
-            [0, 0, 0, 0, 0],
-            [0, 1, 1, 0, 0],
-            [0, 0, 0, 0, 0],
-            [0, 1, 0, 1, 0],
-            [0, 0, 0, 0, 0]
-        ]
+        # Coordinate system: cell (x, y) maps to world position (x+0.5, y+0.5)
+        # x = column (0-4 left to right)
+        # y = row (0-4 bottom to top)
+        #
+        # Visual grid (y increases upward):
+        #   y=4: [ ][ ][G][ ][ ]   G = Goal (2,4)
+        #   y=3: [ ][X][ ][X][ ]   X = Obstacle at (1,3), (3,3)
+        #   y=2: [ ][ ][ ][ ][ ]
+        #   y=1: [ ][X][X][ ][ ]   X = Obstacle at (1,1), (2,1)
+        #   y=0: [S][ ][ ][ ][ ]   S = Start (0,0)
+        #        x=0 x=1 x=2 x=3 x=4
+        
+        # Obstacles at: (1,1), (2,1), (1,3), (3,3)
+        self.obstacles = [(1, 1), (2, 1), (1, 3), (3, 3)]
         
         # Mission waypoints
-        self.start_cell = (0, 0)
-        self.goal_cell = (4, 2)  # Pickup location
+        self.start_cell = (0, 0)   # Bottom-left corner
+        self.goal_cell = (2, 4)    # Top middle area (pickup location)
         
-        # Path to pickup (Nav2 will handle the actual path planning,
-        # but we can specify intermediate waypoints if needed)
-        self.initial_path = [self.goal_cell]  # Just the destination
+        # Path to pickup - go cell by cell through safe cells
+        # Safe path: (0,0) -> (0,1) -> (0,2) -> (0,3) -> (0,4) -> (1,4) -> (2,4)
+        # Goes up column 0 (safe) then moves right to goal at y=4
+        self.initial_path = [
+            (0, 1),  # Move up along x=0
+            (0, 2),  # Continue up
+            (0, 3),  # Continue up  
+            (0, 4),  # Top-left corner
+            (1, 4),  # Move right along y=4
+            (2, 4),  # Arrive at goal
+        ]
         
         # === Nav2 Action Client ===
         self.nav2_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -101,7 +115,7 @@ class Nav2MissionController(Node):
             "object_collected",
             "return_planned",
             "mission_complete",
-            "grid_map",
+            "obstacles",
             "start_cell",
             "goal_cell",
             "robot_position",
@@ -121,7 +135,7 @@ class Nav2MissionController(Node):
         self.blackboard.set("object_collected", False)
         self.blackboard.set("return_planned", False)
         self.blackboard.set("mission_complete", False)
-        self.blackboard.set("grid_map", self.grid_map)
+        self.blackboard.set("obstacles", self.obstacles)
         self.blackboard.set("start_cell", self.start_cell)
         self.blackboard.set("goal_cell", self.goal_cell)
         self.blackboard.set("robot_position", (0.5, 0.5))
@@ -156,24 +170,23 @@ class Nav2MissionController(Node):
     def publish_markers(self):
         """Publish visualization markers for RViz."""
         marker_array = MarkerArray()
-        rows = len(self.grid_map)
-        cols = len(self.grid_map[0])
         
         marker_id = 0
         
-        for r in range(rows):
-            for c in range(cols):
+        # Grid is 5x5, iterate over all cells
+        for x in range(5):
+            for y in range(5):
                 marker = Marker()
-                marker.header.frame_id = "map"
+                marker.header.frame_id = "odom"
                 marker.header.stamp = self.get_clock().now().to_msg()
                 marker.ns = "grid"
                 marker.id = marker_id
                 marker.type = Marker.CUBE
                 marker.action = Marker.ADD
                 
-                # Position at center of cell
-                marker.pose.position.x = c * self.cell_size + 0.5
-                marker.pose.position.y = r * self.cell_size + 0.5
+                # Position at center of cell (x, y) -> world (x+0.5, y+0.5)
+                marker.pose.position.x = (x + 0.5) * self.cell_size
+                marker.pose.position.y = (y + 0.5) * self.cell_size
                 marker.pose.position.z = 0.025
                 marker.pose.orientation.w = 1.0
                 
@@ -183,19 +196,19 @@ class Nav2MissionController(Node):
                 marker.scale.z = 0.05
                 
                 # Color based on cell type
-                if self.grid_map[r][c] == 1:
+                if (x, y) in self.obstacles:
                     # Obstacle - Red
                     marker.color.r = 1.0
                     marker.color.g = 0.0
                     marker.color.b = 0.0
                     marker.color.a = 0.8
-                elif (r, c) == self.start_cell:
+                elif (x, y) == self.start_cell:
                     # Start - Green
                     marker.color.r = 0.0
                     marker.color.g = 1.0
                     marker.color.b = 0.0
                     marker.color.a = 0.8
-                elif (r, c) == self.goal_cell:
+                elif (x, y) == self.goal_cell:
                     # Goal - Blue
                     marker.color.r = 0.0
                     marker.color.g = 0.0

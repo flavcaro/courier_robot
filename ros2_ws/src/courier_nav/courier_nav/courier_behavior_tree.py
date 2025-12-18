@@ -310,11 +310,21 @@ class PlanReturnPath(py_trees.behaviour.Behaviour):
         logger = self.blackboard.get("logger")
         start_cell = self.blackboard.get("start_cell")
         
-        # For Nav2, we just need to set the destination - Nav2 handles path planning
-        self.blackboard.set("path_queue", [start_cell])
+        # Return path: (2,4) -> (1,4) -> (0,4) -> (0,3) -> (0,2) -> (0,1) -> (0,0)
+        # Reverse of outbound path, staying in safe column x=0 and top row y=4
+        return_path = [
+            (1, 4),  # Move left along y=4
+            (0, 4),  # Top-left corner
+            (0, 3),  # Move down along x=0
+            (0, 2),  # Continue down
+            (0, 1),  # Continue down
+            start_cell,  # Arrive at start (0,0)
+        ]
+        
+        self.blackboard.set("path_queue", return_path)
         self.blackboard.set("return_planned", True)
         
-        logger.info(f"[{self.name}] Return path set to {start_cell}")
+        logger.info(f"[{self.name}] Return path set: {return_path}")
         return py_trees.common.Status.SUCCESS
 
 

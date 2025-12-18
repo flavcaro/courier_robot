@@ -84,9 +84,9 @@ sleep 6
 
 # 2. Spawna la griglia di celle
 echo "2️⃣  Spawning griglia (green=start, blue=goal, red=obstacle)..."
-ros2 run courier_nav spawner &
-SPAWNER_PID=$!
-sleep 8
+ros2 run courier_nav spawner
+echo "    Griglia completata!"
+sleep 2
 
 # 3. Spawna il robot
 echo "3️⃣  Spawning robot..."

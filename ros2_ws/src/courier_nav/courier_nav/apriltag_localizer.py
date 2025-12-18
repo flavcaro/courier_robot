@@ -6,8 +6,10 @@ This node detects AprilTags in camera images and publishes pose corrections
 to help the robot localize itself in the environment.
 
 AprilTag positions (known landmarks):
-- Tag ID 0: Start position at cell (0,0) -> (0.5, 0.5)
-- Tag ID 1: Goal position at cell (4,0) -> (0.5, 4.5)
+- Coordinate system: cell (x, y) maps to world position (x+0.5, y+0.5)
+- Tag ID 0: Start position at cell (0,0) -> center (0.5, 0.5)
+- Tag ID 1: Goal position at cell (2,4) -> south edge
+- etc.
 """
 
 import rclpy
@@ -37,10 +39,26 @@ class AprilTagLocalizer(Node):
         super().__init__('apriltag_localizer')
         
         # Known AprilTag positions in world frame (x, y, z, yaw)
-        # These correspond to where the tags are placed in the simulation
+        # Coordinate system: cell (cx, cy) -> world (cx+0.5, cy+0.5)
+        # Tags placed as defined in world_spawner.py
         self.tag_positions = {
-            0: {'x': 0.5, 'y': 0.2, 'z': 0.3, 'yaw': 1.5708},   # Start - facing east (+X)
-            1: {'x': 0.5, 'y': 4.5, 'z': 0.3, 'yaw': 0.0},      # Goal - facing north (+Y)
+            # Tag 0: Start cell (0,0) center, facing north
+            0: {'x': 0.5, 'y': 0.5, 'z': 0.4, 'yaw': 1.5708},
+            
+            # Tag 1: Goal cell (2,4) south edge, facing south
+            1: {'x': 2.5, 'y': 4.15, 'z': 0.4, 'yaw': -1.5708},
+            
+            # Tag 2: Cell (0,2) east edge, facing east
+            2: {'x': 0.85, 'y': 2.5, 'z': 0.4, 'yaw': 0.0},
+            
+            # Tag 3: Cell (0,4) east edge, facing east
+            3: {'x': 0.85, 'y': 4.5, 'z': 0.4, 'yaw': 0.0},
+            
+            # Tag 4: Cell (2,2) south edge, facing south
+            4: {'x': 2.5, 'y': 2.15, 'z': 0.4, 'yaw': -1.5708},
+            
+            # Tag 5: Cell (4,2) west edge, facing west
+            5: {'x': 4.15, 'y': 2.5, 'z': 0.4, 'yaw': 3.14159},
         }
         
         # Camera intrinsics (will be updated from camera_info)
