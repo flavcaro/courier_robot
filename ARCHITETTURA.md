@@ -2,7 +2,7 @@
 
 ## 📋 Panoramica
 
-Il sistema è stato riorganizzato secondo l'architettura modulare specificata nel Project Proposal, con separazione delle responsabilità tra **Path Planning** e **Controllo**.
+Il sistema utilizza **Nav2** (Navigation2) per la navigazione autonoma, integrato con un **Behavior Tree** (py_trees) per la logica di missione ad alto livello. Questa architettura combina la robustezza di Nav2 per path planning e controllo con la flessibilità di py_trees per la gestione delle missioni.
 
 ---
 
@@ -13,236 +13,330 @@ Contiene la descrizione del robot (URDF/SDF).
 
 **File principali:**
 - `urdf/courier.urdf.xacro` - Descrizione fisica del robot
-- `launch/sim.launch.py` - Launch file per Gazebo
+- `launch/sim.launch.py` - Launch file per Gazebo + Bridge ROS2
 
 ---
 
-### 2️⃣ **courier_control** ⚙️
+### 2️⃣ **courier_nav** 🗺️
 
-**Responsabilità:** Controllo a basso livello del movimento del robot.
+**Responsabilità:** Navigazione con Nav2 e logica di missione con Behavior Tree.
 
-**Nodo principale:** `pid_controller`
+**Nodi principali:**
+- `nav2_mission_controller` - Controller della missione con behavior tree
+- `spawner` - Spawner della griglia di celle in Gazebo
 
 **Cosa fa:**
-- ✅ Implementa un controllore **PID** per movimento lineare e angolare
-- ✅ Riceve target pose da `/target_pose` (pubblicato dal path planner)
-- ✅ Pubblica comandi di velocità su `/cmd_vel`
-- ✅ Notifica quando un target è raggiunto su `/target_reached`
+- ✅ Utilizza **Nav2** per path planning globale (NavFn) e locale (DWB)
+- ✅ Gestisce la missione con un **Behavior Tree** (py_trees)
+- ✅ Invia goal di navigazione a Nav2 tramite action client
+- ✅ Gestisce raccolta e consegna oggetti
+- ✅ Visualizza la griglia in RViz
 
-**Topic:**
-- **Subscribe:** `/target_pose` (PoseStamped) - Target da raggiungere
-- **Subscribe:** `/odom` (Odometry) - Odometria del robot
-- **Publish:** `/cmd_vel` (Twist) - Comandi di velocità
-- **Publish:** `/target_reached` (PoseStamped) - Notifica target raggiunto
-
-**Controllo PID:**
-```
-PID Lineare:
-- Kp = 0.5
-- Ki = 0.0
-- Kd = 0.1
-
-PID Angolare:
-- Kp = 1.0
-- Ki = 0.0
-- Kd = 0.2
-```
-
-**Strategia di controllo:**
-1. **Fase 1:** Rotazione in-place fino ad allineamento con il target
-2. **Fase 2:** Movimento lineare con correzione angolare ridotta
+**Configurazione Nav2:**
+- `config/nav2_params.yaml` - Parametri completi di Nav2
+- `maps/courier_map.yaml` - Mappa dell'ambiente
+- `maps/courier_map.pgm` - Occupancy grid (100x100 pixel)
 
 ---
 
-### 3️⃣ **courier_nav** 🗺️
+## 🤖 Stack Nav2
 
-**Responsabilità:** Path planning e decisioni ad alto livello.
+Nav2 fornisce navigazione autonoma completa:
 
-**Nodo principale:** `path_planner`
+| Componente | Plugin | Funzione |
+|------------|--------|----------|
+| **Global Planner** | NavFn | Calcola percorso ottimale sulla mappa |
+| **Local Controller** | DWB | Genera comandi velocità smooth |
+| **Costmap Global** | Static + Obstacle + Inflation | Mappa con ostacoli |
+| **Costmap Local** | Voxel + Inflation | Ostacoli dinamici (rolling window) |
+| **Recovery** | Spin, Backup, Wait | Comportamenti di recupero |
+| **Localization** | AMCL | Localizzazione con particle filter |
+| **BT Navigator** | BehaviorTree.CPP | Behavior tree interno Nav2 |
 
-**Cosa fa:**
-- ✅ Calcola il percorso con algoritmo **BFS** (Breadth-First Search)
-- ✅ Gestisce le decisioni con un **Behavior Tree**
-- ✅ Pubblica target pose su `/target_pose` per il controllore PID
-- ✅ Gestisce la batteria simulata e ricarica
-- ✅ Visualizza la griglia e il percorso in RViz
+**Vantaggi rispetto a BFS custom:**
+- ✅ Path smoothing e curve ottimizzate
+- ✅ Obstacle avoidance dinamico
+- ✅ Recovery behaviors automatici
+- ✅ Velocity smoothing per movimenti fluidi
+- ✅ Replanning automatico se bloccato
 
-**Topic:**
-- **Subscribe:** `/odom` (Odometry) - Per conoscere la posizione del robot
-- **Subscribe:** `/target_reached` (PoseStamped) - Per sapere quando avanzare al prossimo waypoint
-- **Publish:** `/target_pose` (PoseStamped) - Prossimo waypoint da raggiungere
-- **Publish:** `/grid_markers` (MarkerArray) - Visualizzazione in RViz
+---
 
-**Behavior Tree:**
+## 🌳 Behavior Tree (py_trees)
+
+Il behavior tree gestisce la **logica di missione** ad alto livello, delegando la navigazione a Nav2:
+
 ```
-Root (Sequence)
-├── Battery Manager (Selector)
-│   ├── BatteryOK (condizione >= 20%)
-│   └── GoCharge (azione)
-└── Mission Selector (Selector)
-    ├── Navigation (se ha target attivo)
-    │   ├── HasTarget
-    │   └── Navigate to Target
-    │       ├── IsAtTarget → ClearTarget
-    │       └── Move Sequence
-    │           ├── IsAligned? → RotateToTarget (monitoraggio)
-    │           └── MoveToTarget (monitoraggio)
-    ├── Get Next Waypoint (se coda non vuota)
-    │   ├── HasPathQueue
-    │   └── GetNextTarget (pubblica nuovo target)
-    └── StopRobot (missione completata)
+Root (Selector)
+├── Mission Complete? ────────────────────► SUCCESS se missione finita
+└── Main Mission (Sequence)
+    ├── Check Battery ────────────────────► FAILURE se batteria < 10%
+    ├── Go To Pickup (Selector)
+    │   ├── Already Collected? ───────────► Skip se già raccolto
+    │   └── Navigate To Pickup (Repeat)
+    │       ├── Get Pickup Waypoint ──────► Pop dalla coda
+    │       └── Nav2 To Pickup ───────────► Action client Nav2
+    ├── Collect Object ───────────────────► Simula raccolta (2 sec)
+    ├── Plan Return (Selector)
+    │   ├── Return Planned? ──────────────► Skip se già pianificato
+    │   └── Plan Return Path ─────────────► Imposta destinazione home
+    ├── Navigate Home (Sequence)
+    │   ├── Get Home Waypoint ────────────► Pop dalla coda
+    │   └── Nav2 To Home ─────────────────► Action client Nav2
+    └── Deliver Object ───────────────────► Simula consegna (2 sec)
 ```
+
+**Behavior key:**
+
+| Behavior | Tipo | Descrizione |
+|----------|------|-------------|
+| `NavigateToCell` | Action | Invia goal a Nav2, monitora completamento |
+| `GetNextWaypoint` | Action | Estrae prossimo waypoint dalla coda |
+| `CheckBattery` | Condition | Verifica livello batteria |
+| `CollectObject` | Action | Simula raccolta oggetto |
+| `DeliverObject` | Action | Simula consegna oggetto |
+| `PlanReturnPath` | Action | Pianifica percorso di ritorno |
 
 ---
 
 ## 🔄 Flusso di Comunicazione
 
 ```
-┌─────────────────┐         /target_pose          ┌─────────────────┐
-│  Path Planner   │ ─────────────────────────────> │ PID Controller  │
-│  (courier_nav)  │                                │(courier_control)│
-│                 │ <───────────────────────────── │                 │
-└─────────────────┘      /target_reached          └─────────────────┘
-         │                                                   │
-         │ /odom (subscribe)                     /cmd_vel (publish)
-         │                                                   │
-         └───────────────────────────────────────────────────┘
-                                │
-                                ▼
-                          [ Robot in Gazebo ]
+┌─────────────────────────────────────────────────────────────────┐
+│                     BEHAVIOR TREE (py_trees)                    │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Mission Controller                                        │  │
+│  │  • Gestisce stati missione                                │  │
+│  │  • Monitora battery, object status                        │  │
+│  │  • Decide quando navigare/raccogliere/consegnare          │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ NavigateToPose Action
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        NAV2 STACK                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │   Planner   │  │ Controller  │  │   Behavior Server       │  │
+│  │   (NavFn)   │  │   (DWB)     │  │ (Spin/Backup/Wait)      │  │
+│  └──────┬──────┘  └──────┬──────┘  └─────────────────────────┘  │
+│         │                │                                      │
+│         ▼                ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Costmap2D (Global + Local)                  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ /cmd_vel
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     GAZEBO SIMULATION                           │
+│  • Robot (differential drive)                                   │
+│  • LiDAR sensor (/scan)                                        │
+│  • Odometry (/odom)                                            │
+│  • Grid world with obstacles                                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 📡 Topic e Action
+
+### Action Servers (Nav2)
+| Action | Tipo | Descrizione |
+|--------|------|-------------|
+| `/navigate_to_pose` | NavigateToPose | Naviga a una posa specifica |
+| `/navigate_through_poses` | NavigateThroughPoses | Naviga attraverso waypoint |
+| `/follow_waypoints` | FollowWaypoints | Segue lista di waypoint |
+
+### Topic Principali
+| Topic | Tipo | Direzione | Descrizione |
+|-------|------|-----------|-------------|
+| `/cmd_vel` | Twist | Nav2 → Robot | Comandi velocità |
+| `/odom` | Odometry | Robot → Nav2 | Odometria |
+| `/scan` | LaserScan | Robot → Nav2 | Dati LiDAR |
+| `/map` | OccupancyGrid | Map Server → All | Mappa statica |
+| `/global_costmap/costmap` | OccupancyGrid | Nav2 → RViz | Costmap globale |
+| `/local_costmap/costmap` | OccupancyGrid | Nav2 → RViz | Costmap locale |
+| `/grid_markers` | MarkerArray | Mission → RViz | Visualizzazione griglia |
 
 ---
 
 ## 🚀 Come Avviare il Sistema
 
-### 1. Build del workspace
+### Metodo 1: Script automatico (consigliato)
+```bash
+# Nel container Docker
+./start_nav2.sh
+```
+
+Questo script:
+1. Installa Nav2 se non presente
+2. Builda il workspace
+3. Avvia Gazebo + Bridge
+4. Spawna griglia e robot
+5. Avvia Nav2 stack
+6. Avvia mission controller
+
+### Metodo 2: Manuale (per debug)
+
+#### 1. Build del workspace
 ```bash
 cd ros2_ws
-colcon build --packages-select courier_control courier_nav courier_description
+colcon build --packages-select courier_nav courier_description
 source install/setup.bash
 ```
 
-### 2. Avvia Gazebo e il robot
+#### 2. Avvia simulazione
 ```bash
 ros2 launch courier_description sim.launch.py
 ```
 
-### 3. Avvia il sistema di navigazione (in un nuovo terminale)
+#### 3. Spawna il robot (in altro terminale)
 ```bash
-cd ros2_ws
-source install/setup.bash
-ros2 launch courier_nav courier_mission.launch.py
+ros2 run ros_gz_sim create -world empty -file robot.sdf -name courier_robot -x 0.5 -y 0.5 -z 0.15
 ```
 
-Questo avvierà **entrambi** i nodi:
-- `pid_controller` (courier_control)
-- `path_planner` (courier_nav)
-
----
-
-## 🧪 Test Individuali
-
-### Solo PID Controller
+#### 4. Avvia Nav2 (in altro terminale)
 ```bash
-ros2 run courier_control pid_controller
+ros2 launch courier_nav nav2_bringup.launch.py use_sim_time:=true
 ```
 
-### Solo Path Planner
+#### 5. Avvia mission controller (in altro terminale)
 ```bash
-ros2 run courier_nav path_planner
-```
-
-### Pubblicare un target manualmente (per testare il PID)
-```bash
-ros2 topic pub /target_pose geometry_msgs/msg/PoseStamped "{
-  header: {frame_id: 'odom'},
-  pose: {position: {x: 2.0, y: 2.0, z: 0.0}}
-}"
+ros2 run courier_nav nav2_mission_controller
 ```
 
 ---
 
 ## 📊 Monitoraggio
 
-### Visualizzare i topic attivi
+### Visualizzare in RViz2
 ```bash
-ros2 topic list
+rviz2 -d /opt/ros/jazzy/share/nav2_bringup/rviz/nav2_default_view.rviz
 ```
 
-### Vedere i messaggi su /target_pose
+### Status navigazione Nav2
 ```bash
-ros2 topic echo /target_pose
+ros2 topic echo /navigate_to_pose/_action/status
 ```
 
-### Vedere i comandi di velocità
+### Comandi velocità
 ```bash
 ros2 topic echo /cmd_vel
 ```
 
-### Vedere la batteria (nei log del path_planner)
-I log mostrano:
-- 📍 Nuovo target pubblicato
-- ✅ Target raggiunto
-- 🔋 Livello batteria
+### Costmap globale
+```bash
+ros2 topic echo /global_costmap/costmap
+```
+
+### Behavior Tree status (nei log)
+Il mission controller stampa:
+- 🌳 Struttura del behavior tree all'avvio
+- 📍 Navigazione verso waypoint
+- ✅ Waypoint raggiunto
+- 📦 Oggetto raccolto/consegnato
 
 ---
 
 ## 🔧 Parametri Configurabili
 
-### PID Controller ([pid_controller.py](ros2_ws/src/courier_control/courier_control/pid_controller.py))
-- `kp_linear`, `ki_linear`, `kd_linear` - Guadagni PID lineari
-- `kp_angular`, `ki_angular`, `kd_angular` - Guadagni PID angolari
-- `dist_tolerance` - Tolleranza distanza (default: 0.15m)
-- `angle_tolerance` - Tolleranza angolare (default: 0.15 rad)
+### Nav2 Parameters ([config/nav2_params.yaml](ros2_ws/src/courier_nav/config/nav2_params.yaml))
 
-### Path Planner ([courier_controller.py](ros2_ws/src/courier_nav/courier_nav/courier_controller.py))
-- `cell_size` - Dimensione cella griglia (default: 1.0m)
-- `grid_map` - Mappa con ostacoli (0=libero, 1=ostacolo)
-- `start_cell`, `goal_cell` - Celle di partenza e arrivo
-- `battery_threshold` - Soglia batteria per ricarica (default: 20%)
+**Controller (DWB):**
+```yaml
+max_vel_x: 0.26        # Velocità lineare max
+max_vel_theta: 1.0     # Velocità angolare max
+xy_goal_tolerance: 0.15 # Tolleranza posizione goal
+```
+
+**Planner (NavFn):**
+```yaml
+tolerance: 0.5         # Tolleranza planning
+use_astar: false       # Usa Dijkstra (più robusto)
+```
+
+**Costmap:**
+```yaml
+robot_radius: 0.15     # Raggio robot per inflazione
+inflation_radius: 0.35 # Raggio zona di sicurezza
+resolution: 0.05       # Risoluzione mappa (m/pixel)
+```
+
+### Mission Controller ([nav2_mission_controller.py](ros2_ws/src/courier_nav/courier_nav/nav2_mission_controller.py))
+```python
+cell_size = 1.0        # Dimensione cella (metri)
+start_cell = (0, 0)    # Cella di partenza
+goal_cell = (4, 2)     # Cella pickup
+```
 
 ---
 
-## 📝 Differenze rispetto all'architettura precedente
+## 📐 Mappa dell'Ambiente
 
-| Aspetto | Prima | Dopo |
-|---------|-------|------|
-| **Controllo movimento** | Tutto in `courier_controller` | Separato in `pid_controller` |
-| **Path planning** | Integrato con controllo | In `path_planner` (courier_nav) |
-| **Comunicazione** | Diretta con `/cmd_vel` | Tramite `/target_pose` |
-| **Architettura** | Monolitica | Modulare (come da PDF) |
-| **Responsabilità** | Mescolate | Chiare e separate |
+**Griglia 5x5** (celle da 1m):
+
+```
+     Col 0   Col 1   Col 2   Col 3   Col 4
+    ┌───────┬───────┬───────┬───────┬───────┐
+Row 0│ START │       │       │       │       │
+    ├───────┼───────┼───────┼───────┼───────┤
+Row 1│       │  ███  │  ███  │       │       │
+    ├───────┼───────┼───────┼───────┼───────┤
+Row 2│       │       │       │       │       │
+    ├───────┼───────┼───────┼───────┼───────┤
+Row 3│       │  ███  │       │  ███  │       │
+    ├───────┼───────┼───────┼───────┼───────┤
+Row 4│       │       │ GOAL  │       │       │
+    └───────┴───────┴───────┴───────┴───────┘
+
+███ = Ostacolo
+START = Cella (0,0) - Partenza e consegna
+GOAL = Cella (4,2) - Punto di raccolta
+```
 
 ---
 
-## ✅ Conformità al Project Proposal
+## ✅ Vantaggi dell'Architettura Nav2
 
-✔️ **courier_control** implementa controllore PID  
-✔️ **courier_nav** gestisce path planning e behavior tree  
-✔️ **courier_description** contiene modello robot  
-✔️ Separazione chiara tra path planning e controllo  
-✔️ Comunicazione tramite topic ROS2 standard  
+| Aspetto | Prima (BFS custom) | Ora (Nav2) |
+|---------|-------------------|------------|
+| **Path Planning** | BFS su griglia discreta | NavFn con smooth paths |
+| **Controllo** | PID custom | DWB con velocity smoothing |
+| **Ostacoli** | Solo statici da mappa | Dinamici con costmap |
+| **Recovery** | Nessuno | Spin, Backup, Wait automatici |
+| **Movimento** | Rotate-Move-Rotate | Curve fluide continue |
+| **Replanning** | Manuale | Automatico se bloccato |
+| **Scalabilità** | Limitata | Pronto per ambienti reali |
 
 ---
 
 ## 🐛 Troubleshooting
 
+### Nav2 non si avvia
+1. Verificare installazione: `ros2 pkg list | grep nav2`
+2. Se mancante: `sudo apt install ros-jazzy-navigation2 ros-jazzy-nav2-bringup`
+
 ### Il robot non si muove
-1. Verificare che entrambi i nodi siano attivi: `ros2 node list`
-2. Controllare i topic: `ros2 topic list`
-3. Verificare che `/target_pose` riceva messaggi: `ros2 topic echo /target_pose`
+1. Verificare TF tree: `ros2 run tf2_tools view_frames`
+2. Deve esistere: `map → odom → base_link`
+3. Controllare costmap: `ros2 topic echo /global_costmap/costmap`
 
-### Il PID è troppo aggressivo
-Ridurre i guadagni `kp_linear` e `kp_angular` in [pid_controller.py](ros2_ws/src/courier_control/courier_control/pid_controller.py)
+### Navigation goal rejected
+1. Verificare che il goal sia in area libera della costmap
+2. Controllare log di Nav2: cercare "rejected" o "failed"
 
-### Il robot non raggiunge il target
-Aumentare le tolleranze `dist_tolerance` e `angle_tolerance`
+### Behavior tree non avanza
+1. Controllare log del mission controller
+2. Verificare blackboard values
+3. Stampare tree status con `py_trees.display.unicode_tree()`
 
 ---
 
 ## 📚 Riferimenti
 
-- [Project Proposal.pdf](../Project Proposal.pdf)
-- [Behavior Tree Documentation](ros2_ws/src/courier_nav/BEHAVIOR_TREE.md)
-- [ROS2 Humble Documentation](https://docs.ros.org/en/humble/)
+- [Nav2 Documentation](https://docs.nav2.org/)
+- [py_trees Documentation](https://py-trees.readthedocs.io/)
+- [ROS2 Jazzy Documentation](https://docs.ros.org/en/jazzy/)
+- [BehaviorTree.CPP](https://www.behaviortree.dev/) (usato internamente da Nav2)

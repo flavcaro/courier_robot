@@ -2,6 +2,28 @@
 <sdf version="1.8">
     <model name='courier_robot'>
         <pose>0 0 0.1 0 0 0</pose>
+        
+        <!-- Base link (main robot frame) -->
+        <link name='base_link'>
+            <pose>0 0 0 0 0 0</pose>
+            <inertial>
+                <mass>0.01</mass>
+                <inertia>
+                    <ixx>0.0001</ixx> <ixy>0</ixy> <ixz>0</ixz>
+                    <iyy>0.0001</iyy> <iyz>0</iyz> <izz>0.0001</izz>
+                </inertia>
+            </inertial>
+        </link>
+        
+        <!-- Base footprint (ground projection) -->
+        <link name='base_footprint'>
+            <pose>0 0 -0.1 0 0 0</pose>
+        </link>
+        <joint name='base_footprint_joint' type='fixed'>
+            <parent>base_link</parent>
+            <child>base_footprint</child>
+        </joint>
+        
         <link name='chassis'>
             <pose>-0.1 0 0 0 0 0</pose>
             <inertial>
@@ -65,6 +87,10 @@
             <parent>chassis</parent>
             <child>right_wheel</child>
             <axis><xyz>0 0 1</xyz></axis>
+        </joint>
+        <joint name='chassis_joint' type='fixed'>
+            <parent>base_link</parent>
+            <child>chassis</child>
         </joint>
 
         <link name='caster'>
@@ -166,14 +192,60 @@
                         <far>10</far>
                     </clip>
                 </camera>
-                <always_on>0</always_on>
-                <visualize>false</visualize>
+                <always_on>1</always_on>
+                <visualize>true</visualize>
                 <topic>camera</topic>
             </sensor>
         </link>
         <joint name='camera_joint' type='fixed'>
             <parent>chassis</parent>
             <child>camera_link</child>
+        </joint>
+
+        <!-- Lidar for navigation and localization -->
+        <link name='lidar_link'>
+            <pose>0 0 0.2 0 0 0</pose>
+            <inertial>
+                <mass>0.1</mass>
+                <inertia>
+                    <ixx>0.0001</ixx> <ixy>0</ixy> <ixz>0</ixz>
+                    <iyy>0.0001</iyy> <iyz>0</iyz> <izz>0.0001</izz>
+                </inertia>
+            </inertial>
+            <visual name='lidar_visual'>
+                <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+                <material><ambient>0.0 0.0 0.0 1</ambient><diffuse>0.0 0.0 0.0 1</diffuse></material>
+            </visual>
+            <sensor name='gpu_lidar' type='gpu_lidar'>
+                <update_rate>10</update_rate>
+                <lidar>
+                    <scan>
+                        <horizontal>
+                            <samples>360</samples>
+                            <resolution>1</resolution>
+                            <min_angle>-3.14159</min_angle>
+                            <max_angle>3.14159</max_angle>
+                        </horizontal>
+                    </scan>
+                    <range>
+                        <min>0.15</min>
+                        <max>6.0</max>
+                        <resolution>0.01</resolution>
+                    </range>
+                    <noise>
+                        <type>gaussian</type>
+                        <mean>0</mean>
+                        <stddev>0.01</stddev>
+                    </noise>
+                </lidar>
+                <always_on>1</always_on>
+                <visualize>true</visualize>
+                <topic>scan</topic>
+            </sensor>
+        </link>
+        <joint name='lidar_joint' type='fixed'>
+            <parent>chassis</parent>
+            <child>lidar_link</child>
         </joint>
 
         <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">

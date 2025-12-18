@@ -13,21 +13,25 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'maps'), glob('maps/*.yaml') + glob('maps/*.pgm') + glob('maps/*.png')),
     ],
     install_requires=[
         'setuptools',
         'py_trees>=2.2.0',
+        'opencv-python',
+        'numpy',
     ],
     zip_safe=True,
     maintainer='ubuntu',
     maintainer_email='ubuntu@todo.todo',
-    description='Courier navigation with mission behavior tree',
+    description='Courier navigation with Nav2',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'mission_controller = courier_nav.courier_controller:main',
-            'controller = courier_nav.courier_controller:main',
+            'nav2_mission_controller = courier_nav.nav2_mission_controller:main',
             'spawner = courier_nav.world_spawner:main',
+            'apriltag_localizer = courier_nav.apriltag_localizer:main',
         ],
     },
 )

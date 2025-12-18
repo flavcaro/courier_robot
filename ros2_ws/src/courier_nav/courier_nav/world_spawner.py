@@ -57,6 +57,8 @@ class WorldSpawner(Node):
     def spawn_object(self, name, x, y, z, color, sx, sy, sz, with_collision=True):
         sdf_content = self.get_sdf_box(color, sx, sy, sz, with_collision)
         
+        self.get_logger().info(f"Spawning {name} at ({x:.2f}, {y:.2f}, {z:.2f}) - color: {color}")
+        
         # Comando per spawnare in Harmonic: ros2 run ros_gz_sim create ...
         cmd = [
             "ros2", "run", "ros_gz_sim", "create",
@@ -68,7 +70,7 @@ class WorldSpawner(Node):
         
         # Esegue il comando senza bloccare troppo
         subprocess.Popen(cmd)
-        time.sleep(0.2) # Pausa per non intasare Gazebo
+        time.sleep(0.3) # Pausa per non intasare Gazebo
 
     def spawn_world(self):
         rows = len(self.grid_map)

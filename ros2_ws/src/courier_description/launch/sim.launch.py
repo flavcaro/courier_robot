@@ -73,13 +73,23 @@ def generate_launch_description():
 
             '/odom@nav_msgs/msg/Odometry@gz.msgs.Odometry',
 
-            # Lidar: Gazebo -> ROS
+            # Lidar: Gazebo -> ROS (gpu_lidar uses LaserScan)
 
-            '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
+            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+
+            # Camera: Gazebo -> ROS (for AprilTag detection)
+
+            '/camera@sensor_msgs/msg/Image[gz.msgs.Image',
+
+            '/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
 
             # Trasformazioni TF
 
-            '/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V'
+            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
+
+            # Clock per use_sim_time
+
+            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'
 
         ],
 
