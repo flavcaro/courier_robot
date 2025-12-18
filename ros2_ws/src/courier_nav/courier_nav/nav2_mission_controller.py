@@ -1,381 +1,221 @@
 #!/usr/bin/env python3
 """
-Nav2 Mission Controller - Cell-to-Cell Navigation
+Cell-to-Cell Navigation Controller - STRICT ORTHOGONAL MOVEMENT
 
-Navigazione diretta cell-to-cell SENZA percorsi diagonali:
-1. Il robot si ferma
-2. Si ruota verso la cella target
-3. Controlla se ci sono ostacoli davanti
-4. Se libero, avanza dritto alla cella successiva
-5. Se ostacolo, ricalcola percorso alternativo
+Il robot si muove SOLO in linea retta tra celle adiacenti:
+1. STOP completo
+2. ROTATE in place fino ad allineamento perfetto (0°, 90°, 180°, -90°)
+3. MOVE STRAIGHT senza correzioni angolari
+4. Ripeti per ogni cella
 
-Questo approccio evita i percorsi diagonali generati da Nav2.
+NO diagonal movements, NO curved paths.
 """
 
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionClient
 
-from geometry_msgs.msg import PoseStamped, Twist, PoseWithCovarianceStamped
-from nav2_msgs.action import NavigateToPose
+from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker, MarkerArray
 
 import math
-import time
 from enum import Enum
 from collections import deque
 
 
 class RobotState(Enum):
-    IDLE = 0
+    WAITING_START = 0
     ROTATING = 1
-    CHECKING_PATH = 2
-    MOVING_FORWARD = 3
-    WAITING_OBSTACLE = 4
-    ARRIVED = 5
-    MISSION_COMPLETE = 6
+    MOVING = 2
+    REACHED_WAYPOINT = 3
+    MISSION_COMPLETE = 4
 
 
 class CellToCellController(Node):
-    """
-    Controller per navigazione cell-to-cell senza diagonali.
-    """
     
     def __init__(self):
         super().__init__('cell_to_cell_controller')
         
-        # === Configuration ===
+        # === Grid Configuration ===
         self.cell_size = 1.0
         self.grid_size = 5
         
-        # Obstacles
-        self.obstacles = {(1, 1), (2, 1), (1, 3), (3, 3)}
+        # Obstacles as (row, col) - row is Y, col is X in world
+        self.obstacles = {(1, 1), (1, 2), (3, 1), (3, 3)}
         
-        # Mission
+        # Mission: start (0,0) -> goal (4,2)
         self.start_cell = (0, 0)
-        self.goal_cell = (2, 4)
+        self.goal_cell = (4, 2)
+        
+        # === Robot State ===
+        self.robot_x = 0.5
+        self.robot_y = 0.5
+        self.robot_yaw = 0.0
+        
+        # === Navigation State ===
+        self.state = RobotState.WAITING_START
+        self.path_queue = deque()
+        self.current_target = None
+        self.target_world_x = 0.0
+        self.target_world_y = 0.0
+        self.target_yaw = 0.0  # The EXACT angle we need (0, π/2, π, -π/2)
+        
+        # === Control Parameters - STRICT ===
+        self.rotation_speed = 0.5        # Aumentata
+        self.linear_speed = 0.25         # Aumentata
+        self.angle_tolerance = 0.05      # ~3 degrees
+        self.position_tolerance = 0.12   # 12cm
+        
+        # === LIDAR Parameters ===
+        self.front_distance = 0.5        # Default to close - assume obstacle until proven otherwise
+        self.obstacle_threshold = 0.50   # Stop if obstacle closer than 50cm
+        self.lidar_received = False      # Track if we got LIDAR data
         
         # === Publishers/Subscribers ===
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.marker_pub = self.create_publisher(MarkerArray, '/grid_markers', 10)
+        self.marker_pub = self.create_publisher(MarkerArray, '/path_markers', 10)
         
         self.odom_sub = self.create_subscription(
             Odometry, '/odom', self.odom_callback, 10)
         self.scan_sub = self.create_subscription(
             LaserScan, '/scan', self.scan_callback, 10)
-        self.apriltag_sub = self.create_subscription(
-            PoseWithCovarianceStamped, '/apriltag_pose', self.apriltag_callback, 10)
-        
-        # === Robot State ===
-        self.current_x = 0.5
-        self.current_y = 0.5
-        self.current_yaw = 0.0
-        
-        self.state = RobotState.IDLE
-        self.current_cell = self.start_cell
-        self.target_cell = None
-        self.path_queue = deque()
-        
-        # === LIDAR Data ===
-        self.front_distance = float('inf')
-        self.front_clear = True
-        self.min_safe_distance = 0.45  # Distanza minima sicura
-        
-        # === AprilTag ===
-        self.apriltag_x = None
-        self.apriltag_y = None
-        self.apriltag_time = None
-        
-        # === Control Parameters ===
-        self.rotation_speed = 0.5  # rad/s
-        self.linear_speed = 0.2   # m/s
-        self.angle_tolerance = 0.1  # rad (~6 degrees)
-        self.position_tolerance = 0.15  # meters
         
         # === Timers ===
-        self.control_timer = self.create_timer(0.05, self.control_loop)  # 20 Hz
+        self.control_timer = self.create_timer(0.05, self.control_loop)  # 20Hz
         self.marker_timer = self.create_timer(1.0, self.publish_markers)
+        self.lidar_check_timer = self.create_timer(2.0, self.check_lidar)  # Check LIDAR
+        self.startup_timer = self.create_timer(3.0, self.start_mission)
         
-        # Delay start to allow sensors to initialize
-        self.startup_timer = self.create_timer(2.0, self.start_mission)
-        
-        self.get_logger().info('='*60)
-        self.get_logger().info('CELL-TO-CELL NAVIGATION CONTROLLER')
+        self.get_logger().info('='*50)
+        self.get_logger().info('STRICT ORTHOGONAL CONTROLLER')
         self.get_logger().info(f'Start: {self.start_cell} -> Goal: {self.goal_cell}')
-        self.get_logger().info(f'Obstacles: {self.obstacles}')
-        self.get_logger().info('='*60)
+        self.get_logger().info('='*50)
+
+    def check_lidar(self):
+        """Periodically check if LIDAR is working."""
+        if not self.lidar_received:
+            self.get_logger().warn('NO LIDAR DATA RECEIVED! Check /scan topic')
+        else:
+            self.get_logger().info(f'LIDAR OK: front_distance = {self.front_distance:.2f}m')
+
+    def cell_to_world(self, row, col):
+        """Convert grid cell (row, col) to world coordinates (x, y)."""
+        world_x = (col + 0.5) * self.cell_size
+        world_y = (row + 0.5) * self.cell_size
+        return world_x, world_y
     
+    def world_to_cell(self, x, y):
+        """Convert world coordinates to grid cell."""
+        col = int(x / self.cell_size)
+        row = int(y / self.cell_size)
+        return row, col
+
     def start_mission(self):
-        """Start the mission after initial delay."""
+        """Calculate path and start navigation."""
         self.startup_timer.cancel()
         
-        # Calculate initial path
-        self.path_queue = deque(self.calculate_path(self.current_cell, self.goal_cell))
+        current_cell = self.world_to_cell(self.robot_x, self.robot_y)
+        self.get_logger().info(f'Robot at ({self.robot_x:.2f}, {self.robot_y:.2f}) = cell {current_cell}')
         
-        if self.path_queue:
-            self.get_logger().info(f'Path calculated: {list(self.path_queue)}')
-            self.state = RobotState.IDLE
-            self.next_waypoint()
+        # Calculate BFS path
+        path = self.bfs_path(current_cell, self.goal_cell)
+        
+        if path:
+            self.path_queue = deque(path)
+            self.get_logger().info(f'PATH FOUND with {len(path)} waypoints:')
+            for i, cell in enumerate(path):
+                wx, wy = self.cell_to_world(cell[0], cell[1])
+                self.get_logger().info(f'   {i+1}. Cell{cell} -> World({wx:.2f}, {wy:.2f})')
+            self.go_to_next_waypoint()
         else:
-            self.get_logger().error('No path found to goal!')
+            self.get_logger().error('NO PATH FOUND!')
             self.state = RobotState.MISSION_COMPLETE
-    
-    def calculate_path(self, start, goal):
-        """
-        BFS pathfinding che genera solo movimenti ortogonali (no diagonali).
-        """
+
+    def bfs_path(self, start, goal):
+        """BFS pathfinding - ONLY 4 directions (no diagonals)."""
         if start == goal:
             return []
         
-        # BFS
+        # 4 directions ONLY: (row_delta, col_delta)
+        # up=row+1, down=row-1, left=col-1, right=col+1
+        directions = [(1, 0), (-1, 0), (0, -1), (0, 1)]
+        
         queue = deque([(start, [start])])
         visited = {start}
         
-        # Solo 4 direzioni: su, giù, sinistra, destra (NO diagonali)
-        directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-        
         while queue:
-            current, path = queue.popleft()
+            (row, col), path = queue.popleft()
             
-            for dx, dy in directions:
-                nx, ny = current[0] + dx, current[1] + dy
-                next_cell = (nx, ny)
+            for drow, dcol in directions:
+                nrow, ncol = row + drow, col + dcol
+                next_cell = (nrow, ncol)
                 
-                # Check bounds
-                if not (0 <= nx < self.grid_size and 0 <= ny < self.grid_size):
+                if not (0 <= nrow < self.grid_size and 0 <= ncol < self.grid_size):
                     continue
                 
-                # Check if visited or obstacle
-                if next_cell in visited or next_cell in self.obstacles:
+                if next_cell in self.obstacles or next_cell in visited:
                     continue
                 
                 new_path = path + [next_cell]
                 
                 if next_cell == goal:
-                    return new_path[1:]  # Exclude start cell
+                    return new_path[1:]  # Exclude start
                 
                 visited.add(next_cell)
                 queue.append((next_cell, new_path))
         
-        return []  # No path found
-    
-    def next_waypoint(self):
-        """Set next waypoint from queue."""
+        return []
+
+    def go_to_next_waypoint(self):
+        """Set next target cell and calculate EXACT required angle."""
         if not self.path_queue:
-            self.get_logger().info('PATH COMPLETED - Arrived at goal!')
-            self.state = RobotState.MISSION_COMPLETE
+            self.get_logger().info('='*50)
+            self.get_logger().info('MISSION COMPLETE!')
+            self.get_logger().info('='*50)
             self.stop_robot()
+            self.state = RobotState.MISSION_COMPLETE
             return
         
-        self.target_cell = self.path_queue.popleft()
-        self.get_logger().info(f'Next waypoint: {self.target_cell} (remaining: {len(self.path_queue)})')
-        self.state = RobotState.ROTATING
-    
-    def odom_callback(self, msg):
-        """Update robot position from odometry."""
-        pos = msg.pose.pose.position
-        self.current_x = pos.x
-        self.current_y = pos.y
+        self.current_target = self.path_queue.popleft()
+        row, col = self.current_target
+        self.target_world_x, self.target_world_y = self.cell_to_world(row, col)
         
-        # Yaw from quaternion
-        q = msg.pose.pose.orientation
-        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
+        # Calculate direction to target
+        dx = self.target_world_x - self.robot_x
+        dy = self.target_world_y - self.robot_y
         
-        # Update current cell
-        self.current_cell = (
-            int(self.current_x / self.cell_size),
-            int(self.current_y / self.cell_size)
-        )
-    
-    def scan_callback(self, msg):
-        """Process LIDAR scan."""
-        if len(msg.ranges) == 0:
-            return
-        
-        num_readings = len(msg.ranges)
-        angle_increment = msg.angle_increment
-        angle_min = msg.angle_min
-        
-        # Front sector: -30° to +30° (stretto, solo davanti)
-        front_start = int((-0.52 - angle_min) / angle_increment)
-        front_end = int((0.52 - angle_min) / angle_increment)
-        
-        front_start = max(0, min(front_start, num_readings - 1))
-        front_end = max(0, min(front_end, num_readings - 1))
-        
-        valid_ranges = []
-        for i in range(front_start, front_end + 1):
-            r = msg.ranges[i]
-            if msg.range_min < r < msg.range_max:
-                valid_ranges.append(r)
-        
-        self.front_distance = min(valid_ranges) if valid_ranges else float('inf')
-        self.front_clear = self.front_distance > self.min_safe_distance
-    
-    def apriltag_callback(self, msg):
-        """Receive AprilTag position."""
-        self.apriltag_x = msg.pose.pose.position.x
-        self.apriltag_y = msg.pose.pose.position.y
-        self.apriltag_time = self.get_clock().now()
-    
-    def get_best_position(self):
-        """Get best position estimate (AprilTag if recent, else odometry)."""
-        if self.apriltag_time is not None:
-            age = (self.get_clock().now() - self.apriltag_time).nanoseconds / 1e9
-            if age < 1.0 and self.apriltag_x is not None:
-                return self.apriltag_x, self.apriltag_y
-        return self.current_x, self.current_y
-    
-    def control_loop(self):
-        """Main control loop - state machine."""
-        if self.state == RobotState.MISSION_COMPLETE:
-            return
-        
-        if self.state == RobotState.IDLE:
-            self.next_waypoint()
-            return
-        
-        if self.target_cell is None:
-            return
-        
-        # Target position (center of cell)
-        target_x = (self.target_cell[0] + 0.5) * self.cell_size
-        target_y = (self.target_cell[1] + 0.5) * self.cell_size
-        
-        # Current position
-        curr_x, curr_y = self.get_best_position()
-        
-        # Vector to target
-        dx = target_x - curr_x
-        dy = target_y - curr_y
-        distance = math.sqrt(dx*dx + dy*dy)
-        target_angle = math.atan2(dy, dx)
-        angle_error = self.normalize_angle(target_angle - self.current_yaw)
-        
-        cmd = Twist()
-        
-        # === STATE MACHINE ===
-        
-        if self.state == RobotState.ROTATING:
-            # Fase 1: Ruota verso il target
-            if abs(angle_error) < self.angle_tolerance:
-                self.get_logger().info(f'Rotation complete. Angle error: {math.degrees(angle_error):.1f}°')
-                self.state = RobotState.CHECKING_PATH
+        # Determine EXACT cardinal direction (0°, 90°, 180°, -90°)
+        if abs(dx) > abs(dy):
+            # Moving in X direction
+            if dx > 0:
+                self.target_yaw = 0.0  # East (+X)
             else:
-                cmd.angular.z = self.rotation_speed if angle_error > 0 else -self.rotation_speed
-                # Slow down when close to target angle
-                if abs(angle_error) < 0.3:
-                    cmd.angular.z *= 0.5
-        
-        elif self.state == RobotState.CHECKING_PATH:
-            # Fase 2: Controlla se il percorso è libero
-            if self.front_clear:
-                self.get_logger().info(f'Path clear (distance: {self.front_distance:.2f}m). Moving forward.')
-                self.state = RobotState.MOVING_FORWARD
-            else:
-                self.get_logger().warn(f'OBSTACLE DETECTED at {self.front_distance:.2f}m! Finding alternate path...')
-                self.state = RobotState.WAITING_OBSTACLE
-                self.handle_obstacle()
-        
-        elif self.state == RobotState.MOVING_FORWARD:
-            # Fase 3: Avanza dritto
-            
-            # Check if arrived
-            if distance < self.position_tolerance:
-                self.get_logger().info(f'Arrived at cell {self.target_cell}')
-                self.stop_robot()
-                self.state = RobotState.ARRIVED
-                # Small delay then next waypoint
-                self.create_timer(0.5, self.arrived_callback, callback_group=None)
-                return
-            
-            # Check for obstacle while moving
-            if not self.front_clear:
-                self.get_logger().warn(f'OBSTACLE while moving! Distance: {self.front_distance:.2f}m')
-                self.stop_robot()
-                self.state = RobotState.WAITING_OBSTACLE
-                self.handle_obstacle()
-                return
-            
-            # Move forward with minor corrections
-            cmd.linear.x = self.linear_speed
-            
-            # Adjust speed based on distance to target
-            if distance < 0.3:
-                cmd.linear.x *= 0.5
-            
-            # Small angular correction to stay on course
-            if abs(angle_error) > 0.05:
-                cmd.angular.z = angle_error * 0.8
-        
-        elif self.state == RobotState.ARRIVED:
-            # Waiting for callback
-            pass
-        
-        elif self.state == RobotState.WAITING_OBSTACLE:
-            # Handled by handle_obstacle()
-            pass
-        
-        self.cmd_vel_pub.publish(cmd)
-    
-    def arrived_callback(self):
-        """Called when arrived at waypoint."""
-        if self.state == RobotState.ARRIVED:
-            self.state = RobotState.IDLE
-    
-    def handle_obstacle(self):
-        """Handle obstacle - recalculate path."""
-        self.stop_robot()
-        
-        # Mark current target as temporarily blocked
-        blocked_cell = self.target_cell
-        self.get_logger().info(f'Cell {blocked_cell} blocked. Recalculating path...')
-        
-        # Add blocked cell to obstacles temporarily
-        temp_obstacles = self.obstacles.copy()
-        temp_obstacles.add(blocked_cell)
-        
-        # Store original obstacles
-        original_obstacles = self.obstacles
-        self.obstacles = temp_obstacles
-        
-        # Recalculate path from current position
-        new_path = self.calculate_path(self.current_cell, self.goal_cell)
-        
-        # Restore obstacles
-        self.obstacles = original_obstacles
-        
-        if new_path:
-            self.path_queue = deque(new_path)
-            self.get_logger().info(f'New path found: {list(self.path_queue)}')
-            self.state = RobotState.IDLE
+                self.target_yaw = math.pi  # West (-X)
         else:
-            self.get_logger().error('No alternative path found! Waiting...')
-            # Wait and retry
-            self.create_timer(2.0, self.retry_pathfinding)
-    
-    def retry_pathfinding(self):
-        """Retry pathfinding after waiting."""
-        if self.state == RobotState.WAITING_OBSTACLE:
-            self.get_logger().info('Retrying pathfinding...')
-            new_path = self.calculate_path(self.current_cell, self.goal_cell)
-            if new_path:
-                self.path_queue = deque(new_path)
-                self.get_logger().info(f'Path found on retry: {list(self.path_queue)}')
-                self.state = RobotState.IDLE
+            # Moving in Y direction
+            if dy > 0:
+                self.target_yaw = math.pi / 2  # North (+Y)
             else:
-                self.get_logger().error('Still no path. Mission failed.')
-                self.state = RobotState.MISSION_COMPLETE
-    
-    def stop_robot(self):
-        """Stop the robot."""
-        cmd = Twist()
-        self.cmd_vel_pub.publish(cmd)
-    
+                self.target_yaw = -math.pi / 2  # South (-Y)
+        
+        self.get_logger().info('')
+        self.get_logger().info(f'TARGET: Cell{self.current_target} = ({self.target_world_x:.2f}, {self.target_world_y:.2f})')
+        self.get_logger().info(f'ROTATE TO: {math.degrees(self.target_yaw):.0f} deg (current: {math.degrees(self.robot_yaw):.0f} deg)')
+        
+        self.state = RobotState.ROTATING
+
+    def odom_callback(self, msg):
+        """Update robot pose from odometry."""
+        self.robot_x = msg.pose.pose.position.x
+        self.robot_y = msg.pose.pose.position.y
+        
+        # Extract yaw from quaternion
+        q = msg.pose.pose.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
+
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
         while angle > math.pi:
@@ -383,100 +223,238 @@ class CellToCellController(Node):
         while angle < -math.pi:
             angle += 2 * math.pi
         return angle
-    
+
+    def scan_callback(self, msg):
+        """Process LIDAR for obstacle detection."""
+        if len(msg.ranges) == 0:
+            return
+        
+        self.lidar_received = True
+        num_readings = len(msg.ranges)
+        angle_increment = msg.angle_increment
+        angle_min = msg.angle_min
+        
+        # Front sector: -30° to +30°
+        start_idx = int((-0.52 - angle_min) / angle_increment)
+        end_idx = int((0.52 - angle_min) / angle_increment)
+        
+        start_idx = max(0, min(start_idx, num_readings - 1))
+        end_idx = max(0, min(end_idx, num_readings - 1))
+        
+        valid_ranges = []
+        for i in range(start_idx, end_idx + 1):
+            r = msg.ranges[i]
+            if msg.range_min < r < msg.range_max:
+                valid_ranges.append(r)
+        
+        if valid_ranges:
+            self.front_distance = min(valid_ranges)
+        else:
+            self.front_distance = float('inf')
+
+    def control_loop(self):
+        """Main control state machine - STRICT orthogonal movement."""
+        if self.state == RobotState.WAITING_START:
+            return
+        
+        if self.state == RobotState.MISSION_COMPLETE:
+            return
+        
+        if self.state == RobotState.REACHED_WAYPOINT:
+            return
+        
+        # SAFETY CHECK: Always check LIDAR first!
+        if self.front_distance < self.obstacle_threshold:
+            self.stop_robot()
+            self.get_logger().warn(f'EMERGENCY STOP! Obstacle at {self.front_distance:.2f}m')
+            self.handle_obstacle()
+            return
+        
+        # BOUNDARY CHECK: Don't go outside grid!
+        if self.robot_x < 0.1 or self.robot_x > 4.9 or self.robot_y < 0.1 or self.robot_y > 4.9:
+            self.stop_robot()
+            self.get_logger().warn(f'BOUNDARY! Robot at ({self.robot_x:.2f}, {self.robot_y:.2f}) - backing up')
+            self.handle_obstacle()
+            return
+        
+        cmd = Twist()
+        
+        # === STATE: ROTATING ===
+        if self.state == RobotState.ROTATING:
+            angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
+            
+            if abs(angle_error) < self.angle_tolerance:
+                # Rotation complete - FULL STOP before moving
+                self.stop_robot()
+                self.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(self.robot_yaw):.1f}° | LIDAR={self.front_distance:.2f}m')
+                
+                # CHECK LIDAR BEFORE MOVING!
+                if self.front_distance < self.obstacle_threshold:
+                    self.get_logger().warn(f'BLOCKED AHEAD! Distance={self.front_distance:.2f}m - Finding new path')
+                    self.handle_obstacle()
+                    return
+                
+                self.state = RobotState.MOVING
+                return
+            
+            # Rotate in place - NO linear velocity!
+            cmd.linear.x = 0.0
+            if angle_error > 0:
+                cmd.angular.z = self.rotation_speed
+            else:
+                cmd.angular.z = -self.rotation_speed
+            
+            # Slow down when close to target angle
+            if abs(angle_error) < 0.2:
+                cmd.angular.z *= 0.5
+        
+        # === STATE: MOVING ===
+        elif self.state == RobotState.MOVING:
+            # CHECK OBSTACLE CONTINUOUSLY!
+            if self.front_distance < self.obstacle_threshold:
+                self.stop_robot()
+                self.get_logger().warn(f'OBSTACLE at {self.front_distance:.2f}m! Stopping and recalculating...')
+                self.handle_obstacle()
+                return
+            
+            dx = self.target_world_x - self.robot_x
+            dy = self.target_world_y - self.robot_y
+            distance = math.sqrt(dx*dx + dy*dy)
+            
+            # Log periodically
+            if not hasattr(self, '_last_log') or (self.get_clock().now().nanoseconds - self._last_log) > 500000000:
+                self.get_logger().info(f'Moving: dist={distance:.2f}m | LIDAR={self.front_distance:.2f}m')
+                self._last_log = self.get_clock().now().nanoseconds
+            
+            if distance < self.position_tolerance:
+                # Waypoint reached - FULL STOP
+                self.stop_robot()
+                self.get_logger().info(f'REACHED Cell{self.current_target}!')
+                self.state = RobotState.REACHED_WAYPOINT
+                # Go to next waypoint after short delay
+                self.create_timer(0.2, self.waypoint_reached_callback)
+                return
+            
+            # Check if we've drifted off course
+            angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
+            if abs(angle_error) > 0.15:  # ~8.5 degrees
+                # Re-align!
+                self.get_logger().warn(f'DRIFT! Re-aligning...')
+                self.stop_robot()
+                self.state = RobotState.ROTATING
+                return
+            
+            # Move STRAIGHT - NO angular correction!
+            cmd.linear.x = self.linear_speed
+            cmd.angular.z = 0.0
+            
+            # Slow down when approaching target
+            if distance < 0.25:
+                cmd.linear.x *= 0.7
+        
+        self.cmd_vel_pub.publish(cmd)
+
+    def waypoint_reached_callback(self):
+        """Called after reaching a waypoint."""
+        if self.state == RobotState.REACHED_WAYPOINT:
+            self.go_to_next_waypoint()
+
+    def handle_obstacle(self):
+        """Handle obstacle - back up, mark cell as blocked and recalculate path."""
+        self.stop_robot()
+        # Back up a little
+        self.get_logger().info('Backing up...')
+        cmd = Twist()
+        cmd.linear.x = -0.15
+        import time
+        for _ in range(15):
+            self.cmd_vel_pub.publish(cmd)
+            time.sleep(0.05)
+        self.stop_robot()
+
+        # Only mark the cell we tried to move into as blocked, never the start cell or all border cells
+        if self.current_target and self.current_target != self.start_cell:
+            self.obstacles.add(self.current_target)
+            self.get_logger().info(f'Marked Cell{self.current_target} as blocked')
+
+        current_cell = self.world_to_cell(self.robot_x, self.robot_y)
+        self.get_logger().info(f'Current position: ({self.robot_x:.2f}, {self.robot_y:.2f}) = Cell{current_cell}')
+        self.get_logger().info(f'Obstacles now: {self.obstacles}')
+
+        new_path = self.bfs_path(current_cell, self.goal_cell)
+        if new_path:
+            self.path_queue = deque(new_path)
+            self.get_logger().info(f'NEW PATH: {list(self.path_queue)}')
+            self.go_to_next_waypoint()
+        else:
+            self.get_logger().error('NO PATH AVAILABLE! Mission failed.')
+            self.state = RobotState.MISSION_COMPLETE
+
+    def stop_robot(self):
+        """Stop all motion."""
+        cmd = Twist()
+        cmd.linear.x = 0.0
+        cmd.angular.z = 0.0
+        for _ in range(3):
+            self.cmd_vel_pub.publish(cmd)
+
     def publish_markers(self):
         """Publish visualization markers."""
         marker_array = MarkerArray()
-        marker_id = 0
         
-        for x in range(self.grid_size):
-            for y in range(self.grid_size):
-                marker = Marker()
-                marker.header.frame_id = "odom"
-                marker.header.stamp = self.get_clock().now().to_msg()
-                marker.ns = "grid"
-                marker.id = marker_id
-                marker.type = Marker.CUBE
-                marker.action = Marker.ADD
-                
-                marker.pose.position.x = (x + 0.5) * self.cell_size
-                marker.pose.position.y = (y + 0.5) * self.cell_size
-                marker.pose.position.z = 0.025
-                marker.pose.orientation.w = 1.0
-                
-                marker.scale.x = self.cell_size * 0.9
-                marker.scale.y = self.cell_size * 0.9
-                marker.scale.z = 0.05
-                
-                cell = (x, y)
-                if cell in self.obstacles:
-                    marker.color.r, marker.color.g, marker.color.b = 1.0, 0.0, 0.0
-                    marker.color.a = 0.8
-                elif cell == self.start_cell:
-                    marker.color.r, marker.color.g, marker.color.b = 0.0, 1.0, 0.0
-                    marker.color.a = 0.8
-                elif cell == self.goal_cell:
-                    marker.color.r, marker.color.g, marker.color.b = 0.0, 0.0, 1.0
-                    marker.color.a = 0.8
-                elif self.target_cell and cell == self.target_cell:
-                    marker.color.r, marker.color.g, marker.color.b = 1.0, 1.0, 0.0
-                    marker.color.a = 0.8
-                else:
-                    marker.color.r, marker.color.g, marker.color.b = 0.8, 0.8, 0.8
-                    marker.color.a = 0.3
-                
-                marker_array.markers.append(marker)
-                marker_id += 1
+        # Current target marker
+        if self.current_target:
+            marker = Marker()
+            marker.header.frame_id = 'odom'
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = 'target'
+            marker.id = 0
+            marker.type = Marker.CYLINDER
+            marker.action = Marker.ADD
+            
+            wx, wy = self.cell_to_world(self.current_target[0], self.current_target[1])
+            marker.pose.position.x = wx
+            marker.pose.position.y = wy
+            marker.pose.position.z = 0.1
+            marker.pose.orientation.w = 1.0
+            
+            marker.scale.x = 0.3
+            marker.scale.y = 0.3
+            marker.scale.z = 0.2
+            
+            marker.color.r = 0.0
+            marker.color.g = 1.0
+            marker.color.b = 0.0
+            marker.color.a = 0.8
+            
+            marker_array.markers.append(marker)
         
-        # Path visualization
-        if self.path_queue:
-            for i, cell in enumerate(self.path_queue):
-                marker = Marker()
-                marker.header.frame_id = "odom"
-                marker.header.stamp = self.get_clock().now().to_msg()
-                marker.ns = "path"
-                marker.id = marker_id
-                marker.type = Marker.SPHERE
-                marker.action = Marker.ADD
-                
-                marker.pose.position.x = (cell[0] + 0.5) * self.cell_size
-                marker.pose.position.y = (cell[1] + 0.5) * self.cell_size
-                marker.pose.position.z = 0.2
-                marker.pose.orientation.w = 1.0
-                
-                marker.scale.x = marker.scale.y = marker.scale.z = 0.15
-                
-                marker.color.r = 0.0
-                marker.color.g = 1.0
-                marker.color.b = 1.0
-                marker.color.a = 0.8
-                
-                marker_array.markers.append(marker)
-                marker_id += 1
-        
-        # Current state text
-        text_marker = Marker()
-        text_marker.header.frame_id = "odom"
-        text_marker.header.stamp = self.get_clock().now().to_msg()
-        text_marker.ns = "status"
-        text_marker.id = marker_id
-        text_marker.type = Marker.TEXT_VIEW_FACING
-        text_marker.action = Marker.ADD
-        
-        text_marker.pose.position.x = 2.5
-        text_marker.pose.position.y = -0.5
-        text_marker.pose.position.z = 1.0
-        text_marker.pose.orientation.w = 1.0
-        
-        text_marker.scale.z = 0.3
-        text_marker.color.r = 1.0
-        text_marker.color.g = 1.0
-        text_marker.color.b = 1.0
-        text_marker.color.a = 1.0
-        
-        text_marker.text = f"State: {self.state.name}\nTarget: {self.target_cell}\nFront: {self.front_distance:.2f}m"
-        
-        marker_array.markers.append(text_marker)
+        # Path markers
+        for i, cell in enumerate(self.path_queue):
+            marker = Marker()
+            marker.header.frame_id = 'odom'
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = 'path'
+            marker.id = i + 1
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD
+            
+            wx, wy = self.cell_to_world(cell[0], cell[1])
+            marker.pose.position.x = wx
+            marker.pose.position.y = wy
+            marker.pose.position.z = 0.15
+            marker.pose.orientation.w = 1.0
+            
+            marker.scale.x = 0.15
+            marker.scale.y = 0.15
+            marker.scale.z = 0.15
+            
+            marker.color.r = 1.0
+            marker.color.g = 1.0
+            marker.color.b = 0.0
+            marker.color.a = 0.8
+            
+            marker_array.markers.append(marker)
         
         self.marker_pub.publish(marker_array)
 
