@@ -103,6 +103,11 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
         self.goal_handle = future.result()
         logger = self.blackboard.get("logger")
         
+        # Share goal handle with mission controller for obstacle handling
+        node = self.blackboard.get("node")
+        if hasattr(node, 'nav2_goal_handle'):
+            node.nav2_goal_handle = self.goal_handle
+        
         if not self.goal_handle.accepted:
             logger.error(f"[{self.name}] Navigation goal rejected!")
             self.navigation_complete = True

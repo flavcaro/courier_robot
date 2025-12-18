@@ -1,275 +1,269 @@
+#!/usr/bin/env python3
+"""
+World Spawner usando gz service direttamente (Gazebo Harmonic)
+- Griglia 5x5 con pavimento a scacchiera
+- Muri di confine
+- Ostacoli che riempiono le celle
+- AprilTag sui bordi delle celle
+"""
+
 import rclpy
 from rclpy.node import Node
 import subprocess
 import time
+import math
+
 
 class WorldSpawner(Node):
     def __init__(self):
         super().__init__('world_spawner')
         
-        # --- GRID CONFIGURATION ---
-        # Coordinate system: cell (x, y) maps to world position (x+0.5, y+0.5)
-        # x = column (0-4 left to right)
-        # y = row (0-4 bottom to top)
-        #
-        # Visual grid (y increases upward):
-        #   y=4: [ ][ ][ ][ ][ ]
-        #   y=3: [ ][X][ ][X][ ]   X = Obstacle
-        #   y=2: [ ][ ][ ][ ][ ]
-        #   y=1: [ ][X][X][ ][ ]   X = Obstacle
-        #   y=0: [S][ ][ ][ ][ ]   S = Start
-        #        x=0 x=1 x=2 x=3 x=4
-        #
-        # Goal is at (2, 4) - column 2, row 4 (top middle area)
-        
+        self.grid_size = 5
         self.cell_size = 1.0
-        
-        # Obstacles at: (1,1), (2,1), (1,3), (3,3)
         self.obstacles = [(1, 1), (2, 1), (1, 3), (3, 3)]
+        self.start_cell = (0, 0)
+        self.goal_cell = (2, 4)
         
-        self.start_cell = (0, 0)  # Bottom-left corner
-        self.goal_cell = (2, 4)   # Top middle area
-
-        self.get_logger().info('Inizio a popolare il mondo (Gazebo Harmonic)...')
+        self.spawn_counter = 0
+        
+        self.get_logger().info('World Spawner starting...')
+        
+        # Wait for Gazebo to be ready
+        time.sleep(2.0)
+        
         self.spawn_world()
-
-    def get_sdf_box(self, color, size_x, size_y, size_z, with_collision=True):
-        """Genera l'SDF per un cubo colorato"""
-        # Nota: I colori in Harmonic usano <ambient> e <diffuse>
-        rgb = "0.8 0.8 0.8 1"
-        if color == "Red": rgb = "1 0 0 1"
-        elif color == "Green": rgb = "0 1 0 1"
-        elif color == "Blue": rgb = "0 0 1 1"
+    
+    def spawn_sdf(self, name: str, sdf: str, x: float, y: float, z: float = 0.0, yaw: float = 0.0):
+        """Spawn an entity using gz service command."""
+        # Convert yaw to quaternion
+        qz = math.sin(yaw / 2.0)
+        qw = math.cos(yaw / 2.0)
         
-        # Collision block solo se richiesto
-        collision_block = ""
-        if with_collision:
-            collision_block = f"""
-              <collision name='collision'>
-                <geometry><box><size>{size_x} {size_y} {size_z}</size></box></geometry>
-              </collision>"""
+        # Escape SDF for command line - replace newlines and quotes
+        sdf_escaped = sdf.replace('\n', ' ').replace('"', '\\"').replace("'", "\\'")
         
-        return f"""<?xml version='1.0'?>
-        <sdf version='1.6'>
-          <model name='box_model'>
-            <static>true</static>
-            <link name='link'>
-              <visual name='visual'>
-                <geometry><box><size>{size_x} {size_y} {size_z}</size></box></geometry>
-                <material>
-                  <ambient>{rgb}</ambient>
-                  <diffuse>{rgb}</diffuse>
-                </material>
-              </visual>{collision_block}
-            </link>
-          </model>
-        </sdf>"""
-
-    def spawn_object(self, name, x, y, z, color, sx, sy, sz, with_collision=True):
-        sdf_content = self.get_sdf_box(color, sx, sy, sz, with_collision)
+        req = f'sdf: "{sdf_escaped}", name: "{name}", pose: {{position: {{x: {x}, y: {y}, z: {z}}}, orientation: {{z: {qz}, w: {qw}}}}}'
         
-        self.get_logger().info(f"Spawning {name} at ({x:.2f}, {y:.2f}, {z:.2f}) - color: {color}")
-        
-        # Comando per spawnare in Harmonic: ros2 run ros_gz_sim create ...
         cmd = [
-            "ros2", "run", "ros_gz_sim", "create",
-            "-world", "empty",
-            "-name", name,
-            "-string", sdf_content,
-            "-x", str(x), "-y", str(y), "-z", str(z)
+            'gz', 'service', '-s', '/world/empty/create',
+            '--reqtype', 'gz.msgs.EntityFactory',
+            '--reptype', 'gz.msgs.Boolean',
+            '--timeout', '3000',
+            '--req', req
         ]
         
-        # Esegue il comando e attende il completamento
         try:
-            subprocess.run(cmd, timeout=5, capture_output=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                self.get_logger().info(f'Spawned: {name}')
+                return True
+            else:
+                self.get_logger().warn(f'Failed to spawn {name}: {result.stderr}')
+                return False
         except subprocess.TimeoutExpired:
-            self.get_logger().warn(f"Timeout spawning {name}")
-        time.sleep(0.5)  # Pausa per Gazebo
-
+            self.get_logger().warn(f'Timeout spawning {name}')
+            return False
+        except Exception as e:
+            self.get_logger().error(f'Error spawning {name}: {e}')
+            return False
+    
+    def get_box_sdf(self, size_x: float, size_y: float, size_z: float, 
+                   r: float, g: float, b: float, collision: bool = False) -> str:
+        """Generate SDF for a box."""
+        collision_str = f'''<collision name="collision">
+          <geometry><box><size>{size_x} {size_y} {size_z}</size></box></geometry>
+        </collision>''' if collision else ''
+        
+        return f'''<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="box">
+    <static>true</static>
+    <link name="link">
+      {collision_str}
+      <visual name="visual">
+        <geometry><box><size>{size_x} {size_y} {size_z}</size></box></geometry>
+        <material>
+          <ambient>{r} {g} {b} 1</ambient>
+          <diffuse>{r} {g} {b} 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>'''
+    
+    def get_cylinder_sdf(self, radius: float, length: float,
+                        r: float, g: float, b: float) -> str:
+        """Generate SDF for a cylinder."""
+        return f'''<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="cylinder">
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <geometry><cylinder><radius>{radius}</radius><length>{length}</length></cylinder></geometry>
+        <material>
+          <ambient>{r} {g} {b} 1</ambient>
+          <diffuse>{r} {g} {b} 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>'''
+    
     def spawn_world(self):
-        self.get_logger().info(f"Spawning world: start={self.start_cell}, goal={self.goal_cell}")
-        self.get_logger().info(f"Obstacles at: {self.obstacles}")
+        """Spawn all world elements."""
+        self.get_logger().info('='*50)
+        self.get_logger().info('SPAWNING WORLD ELEMENTS')
+        self.get_logger().info('='*50)
         
-        # Spawn start cell (green) - robot starts here
-        start_x = (self.start_cell[0] + 0.5) * self.cell_size
-        start_y = (self.start_cell[1] + 0.5) * self.cell_size
-        self.get_logger().info(f"Start cell at world pos ({start_x}, {start_y})")
-        self.spawn_object("start_cell", start_x, start_y, 0.01, "Green", self.cell_size*0.9, self.cell_size*0.9, 0.02, with_collision=False)
+        grid_length = self.grid_size * self.cell_size
         
-        # Spawn goal cell (blue)
-        goal_x = (self.goal_cell[0] + 0.5) * self.cell_size
-        goal_y = (self.goal_cell[1] + 0.5) * self.cell_size
-        self.get_logger().info(f"Goal cell at world pos ({goal_x}, {goal_y})")
-        self.spawn_object("goal_cell", goal_x, goal_y, 0.01, "Blue", self.cell_size*0.9, self.cell_size*0.9, 0.02, with_collision=False)
+        # 1. FLOOR TILES (checkered pattern)
+        self.get_logger().info('Spawning floor...')
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                is_white = (i + j) % 2 == 0
+                color = (0.9, 0.9, 0.9) if is_white else (0.6, 0.6, 0.6)
+                x = i * self.cell_size + self.cell_size / 2
+                y = j * self.cell_size + self.cell_size / 2
+                
+                sdf = self.get_box_sdf(0.98, 0.98, 0.01, *color)
+                self.spawn_sdf(f'floor_{i}_{j}', sdf, x, y, -0.005)
+                time.sleep(0.05)
         
-        # Spawn obstacles (red cubes) - size 0.95 to block entire cell
-        for obs_x, obs_y in self.obstacles:
-            world_x = (obs_x + 0.5) * self.cell_size
-            world_y = (obs_y + 0.5) * self.cell_size
-            self.get_logger().info(f"Obstacle at cell ({obs_x},{obs_y}) -> world ({world_x}, {world_y})")
-            # Obstacles are 0.95x0.95m to block the entire cell, preventing diagonal paths
-            self.spawn_object(f"obs_{obs_x}_{obs_y}", world_x, world_y, 0.3, "Red", 0.95, 0.95, 0.6, with_collision=True)
-
-        # Spawn AprilTag markers at strategic locations
-        self.get_logger().info("Spawning AprilTag markers...")
-        self.spawn_all_apriltags()
+        # 2. GRID LINES
+        self.get_logger().info('Spawning grid lines...')
+        for i in range(self.grid_size + 1):
+            # Horizontal lines
+            sdf_h = self.get_box_sdf(grid_length, 0.02, 0.01, 0, 0, 0)
+            self.spawn_sdf(f'hline_{i}', sdf_h, grid_length/2, i * self.cell_size, 0.01)
+            time.sleep(0.03)
+            
+            # Vertical lines
+            sdf_v = self.get_box_sdf(0.02, grid_length, 0.01, 0, 0, 0)
+            self.spawn_sdf(f'vline_{i}', sdf_v, i * self.cell_size, grid_length/2, 0.01)
+            time.sleep(0.03)
         
-        self.get_logger().info("All spawn commands completed!")
-    
-    def spawn_apriltag(self, tag_id, x, y, z, yaw, color="White"):
-        """
-        Spawn an AprilTag marker at the specified position.
+        # 3. BOUNDARY WALLS (blue)
+        self.get_logger().info('Spawning boundary walls...')
+        wall_height = 0.4
+        wall_thickness = 0.1
         
-        Args:
-            tag_id: Unique ID for this tag (0, 1, 2, ...)
-            x, y, z: Position in world coordinates
-            yaw: Rotation around Z axis (radians). 0=facing +X, pi/2=facing +Y
-            color: Background color of the tag board
-        """
-        # Color mapping
-        color_rgb = {
-            "White": "1 1 1 1",
-            "Yellow": "1 1 0 1",
-            "Cyan": "0 1 1 1",
-            "Magenta": "1 0 1 1",
-        }.get(color, "1 1 1 1")
+        # South wall (y = 0)
+        sdf = self.get_box_sdf(grid_length + 0.2, wall_thickness, wall_height, 0.2, 0.2, 0.8, True)
+        self.spawn_sdf('wall_south', sdf, grid_length/2, -wall_thickness/2, wall_height/2)
+        time.sleep(0.1)
         
-        sdf_content = f"""<?xml version='1.0'?>
-        <sdf version='1.6'>
-          <model name='apriltag_{tag_id}'>
-            <static>true</static>
-            <pose>0 0 0 0 0 {yaw}</pose>
-            <link name='link'>
-              <visual name='board_visual'>
-                <geometry>
-                  <box><size>0.25 0.02 0.25</size></box>
-                </geometry>
-                <material>
-                  <ambient>{color_rgb}</ambient>
-                  <diffuse>{color_rgb}</diffuse>
-                </material>
-              </visual>
-              <visual name='tag_visual'>
-                <pose>0.011 0 0 0 0 0</pose>
-                <geometry>
-                  <box><size>0.001 0.15 0.15</size></box>
-                </geometry>
-                <material>
-                  <ambient>0 0 0 1</ambient>
-                  <diffuse>0 0 0 1</diffuse>
-                </material>
-              </visual>
-              <visual name='id_marker'>
-                <pose>0.012 0 0.08 0 0 0</pose>
-                <geometry>
-                  <box><size>0.001 0.03 0.03</size></box>
-                </geometry>
-                <material>
-                  <ambient>1 0 0 1</ambient>
-                  <diffuse>1 0 0 1</diffuse>
-                </material>
-              </visual>
-            </link>
-          </model>
-        </sdf>"""
+        # North wall (y = grid_length)
+        self.spawn_sdf('wall_north', sdf, grid_length/2, grid_length + wall_thickness/2, wall_height/2)
+        time.sleep(0.1)
         
-        cmd = [
-            "ros2", "run", "ros_gz_sim", "create",
-            "-world", "empty",
-            "-name", f"apriltag_{tag_id}",
-            "-string", sdf_content,
-            "-x", str(x), "-y", str(y), "-z", str(z)
+        # West wall (x = 0)
+        sdf = self.get_box_sdf(wall_thickness, grid_length + 0.2, wall_height, 0.2, 0.2, 0.8, True)
+        self.spawn_sdf('wall_west', sdf, -wall_thickness/2, grid_length/2, wall_height/2)
+        time.sleep(0.1)
+        
+        # East wall (x = grid_length)
+        self.spawn_sdf('wall_east', sdf, grid_length + wall_thickness/2, grid_length/2, wall_height/2)
+        time.sleep(0.1)
+        
+        # 4. OBSTACLES (red boxes filling cells)
+        self.get_logger().info('Spawning obstacles...')
+        obstacle_sdf = self.get_box_sdf(0.9, 0.9, 0.5, 0.8, 0.1, 0.1, True)
+        
+        for (i, j) in self.obstacles:
+            x = i * self.cell_size + self.cell_size / 2
+            y = j * self.cell_size + self.cell_size / 2
+            
+            self.spawn_sdf(f'obstacle_{i}_{j}', obstacle_sdf, x, y, 0.25)
+            time.sleep(0.1)
+            
+            # X marker on top (orange)
+            x_sdf = self.get_box_sdf(0.6, 0.08, 0.05, 1.0, 0.5, 0.0)
+            self.spawn_sdf(f'x1_{i}_{j}', x_sdf, x, y, 0.55, 0.785)
+            time.sleep(0.05)
+            self.spawn_sdf(f'x2_{i}_{j}', x_sdf, x, y, 0.55, -0.785)
+            time.sleep(0.05)
+        
+        # 5. APRILTAG MARKERS (on cell edges)
+        self.get_logger().info('Spawning AprilTag markers...')
+        # Positions: on edges between cells, not in centers
+        apriltag_positions = [
+            # (x, y, yaw) - positioned at cell intersections/edges
+            (0.0, 0.5, 0.0),       # West edge of (0,0)
+            (0.5, 1.0, -1.57),     # North edge of (0,0)
+            (1.0, 0.5, 3.14),      # East edge of (0,0)
+            (2.0, 0.5, 0.0),       # Between (1,0) and (2,0)
+            (3.0, 0.5, 0.0),       # Between (2,0) and (3,0)
+            (0.5, 2.0, -1.57),     # North edge of (0,1)
+            (3.5, 2.0, -1.57),     # Edge in column 3
+            (0.5, 3.0, -1.57),     # Edge in column 0
+            (2.5, 3.0, -1.57),     # Near goal path
+            (0.5, 4.0, -1.57),     # Edge near top
+            (1.5, 4.0, -1.57),     # Edge near goal
+            (2.5, 5.0, -1.57),     # North of goal
         ]
         
-        try:
-            subprocess.run(cmd, timeout=5, capture_output=True)
-        except subprocess.TimeoutExpired:
-            self.get_logger().warn(f"Timeout spawning apriltag_{tag_id}")
-        time.sleep(0.3)
-        self.get_logger().info(f"AprilTag {tag_id} spawned at ({x:.2f}, {y:.2f}, {z:.2f})")
-    
-    def spawn_all_apriltags(self):
-        """
-        Spawn AprilTags at strategic locations in the grid.
+        tag_id = 0
+        for (x, y, yaw) in apriltag_positions:
+            # Skip if inside obstacle or out of bounds
+            cell_x, cell_y = int(x), int(y)
+            if (cell_x, cell_y) in self.obstacles:
+                continue
+            if x < -0.1 or y < -0.1 or x > grid_length + 0.1 or y > grid_length + 0.1:
+                continue
+            
+            # Pole
+            pole_sdf = self.get_cylinder_sdf(0.02, 0.4, 0.5, 0.5, 0.5)
+            self.spawn_sdf(f'pole_{tag_id}', pole_sdf, x, y, 0.2)
+            time.sleep(0.05)
+            
+            # Tag panel (white background)
+            panel_sdf = self.get_box_sdf(0.15, 0.02, 0.15, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, x, y, 0.45, yaw)
+            time.sleep(0.05)
+            
+            # Tag pattern (black square)
+            pattern_sdf = self.get_box_sdf(0.10, 0.025, 0.10, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, x, y, 0.45, yaw)
+            time.sleep(0.05)
+            
+            tag_id += 1
         
-        Grid layout (x=column, y=row):
-           y=4: [ ][ ][G][ ][ ]   G = Goal (2,4)
-           y=3: [ ][X][ ][X][ ]   X = Obstacle
-           y=2: [ ][ ][ ][ ][ ]
-           y=1: [ ][X][X][ ][ ]   X = Obstacle  
-           y=0: [S][ ][ ][ ][ ]   S = Start (0,0)
-                x=0 x=1 x=2 x=3 x=4
+        # 6. START MARKER (green circle)
+        self.get_logger().info('Spawning start/goal markers...')
+        start_x = self.start_cell[0] * self.cell_size + self.cell_size / 2
+        start_y = self.start_cell[1] * self.cell_size + self.cell_size / 2
+        start_sdf = self.get_cylinder_sdf(0.25, 0.02, 0.0, 0.8, 0.0)
+        self.spawn_sdf('start_marker', start_sdf, start_x, start_y, 0.01)
         
-        Tags are placed at cell edges, facing the direction where robot will approach.
-        """
-        import math
+        # 7. GOAL MARKER (blue circle)
+        goal_x = self.goal_cell[0] * self.cell_size + self.cell_size / 2
+        goal_y = self.goal_cell[1] * self.cell_size + self.cell_size / 2
+        goal_sdf = self.get_cylinder_sdf(0.25, 0.02, 0.0, 0.0, 0.8)
+        self.spawn_sdf('goal_marker', goal_sdf, goal_x, goal_y, 0.01)
         
-        # Tag positions: (tag_id, cell_x, cell_y, position_in_cell, facing_direction, color)
-        # position_in_cell: where in cell to place tag
-        # facing_direction: direction the tag faces (where robot should be to see it)
-        
-        tags = [
-            # Tag 0: At start cell (0,0) - robot can see when starting
-            (0, 0, 0, 'center', 'north', "White"),
-            
-            # Tag 1: At goal cell (2,4) - robot sees when arriving at goal
-            (1, 2, 4, 'south', 'south', "Yellow"),
-            
-            # Tag 2: At cell (0,2) - on the safe path corridor
-            (2, 0, 2, 'east', 'east', "Cyan"),
-            
-            # Tag 3: At cell (0,4) - corner near goal
-            (3, 0, 4, 'east', 'east', "White"),
-            
-            # Tag 4: At cell (2,2) - center corridor
-            (4, 2, 2, 'south', 'south', "Magenta"),
-            
-            # Tag 5: At cell (4,2) - right side of grid
-            (5, 4, 2, 'west', 'west', "Cyan"),
-        ]
-        
-        for tag_id, cell_x, cell_y, position, facing, color in tags:
-            # Base cell center in world coordinates
-            cx = (cell_x + 0.5) * self.cell_size
-            cy = (cell_y + 0.5) * self.cell_size
-            
-            # Offset based on position in cell
-            offset = 0.35  # Distance from cell center to edge
-            if position == 'north':
-                y = cy + offset
-                x = cx
-            elif position == 'south':
-                y = cy - offset
-                x = cx
-            elif position == 'east':
-                x = cx + offset
-                y = cy
-            elif position == 'west':
-                x = cx - offset
-                y = cy
-            else:  # center
-                x = cx
-                y = cy
-            
-            # Yaw based on facing direction
-            # 0 = facing +X (east), pi/2 = facing +Y (north), pi = facing -X (west), -pi/2 = facing -Y (south)
-            yaw_map = {
-                'east': 0,
-                'north': math.pi / 2,
-                'west': math.pi,
-                'south': -math.pi / 2,
-            }
-            yaw = yaw_map.get(facing, 0)
-            
-            z = 0.4  # Height above ground
-            
-            self.spawn_apriltag(tag_id, x, y, z, yaw, color)
+        self.get_logger().info('='*50)
+        self.get_logger().info('WORLD SPAWNING COMPLETE')
+        self.get_logger().info(f'Grid: {self.grid_size}x{self.grid_size}')
+        self.get_logger().info(f'Obstacles: {self.obstacles}')
+        self.get_logger().info(f'AprilTags: {tag_id}')
+        self.get_logger().info('='*50)
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = WorldSpawner()
-    # Non serve spinare perché i comandi sono lanciati subito
-    node.destroy_node()
-    rclpy.shutdown()
+    
+    try:
+        node = WorldSpawner()
+        # Spawn complete, shutdown
+        node.destroy_node()
+    except Exception as e:
+        print(f'Error: {e}')
+    finally:
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
 
