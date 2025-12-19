@@ -38,27 +38,46 @@ class AprilTagLocalizer(Node):
     def __init__(self):
         super().__init__('apriltag_localizer')
         
-        # Known AprilTag positions in world frame (x, y, z, yaw)
-        # Coordinate system: cell (cx, cy) -> world (cx+0.5, cy+0.5)
-        # Tags placed as defined in world_spawner.py
+        # Known AprilTag positions in WORLD frame (x, y, z, yaw)
+        # Tags are flat against walls/obstacles, facing INTO the room
+        # 12 wall tags + 16 obstacle tags = 28 total
         self.tag_positions = {
-            # Tag 0: Start cell (0,0) center, facing north
-            0: {'x': 0.5, 'y': 0.5, 'z': 0.4, 'yaw': 1.5708},
-            
-            # Tag 1: Goal cell (2,4) south edge, facing south
-            1: {'x': 2.5, 'y': 4.15, 'z': 0.4, 'yaw': -1.5708},
-            
-            # Tag 2: Cell (0,2) east edge, facing east
-            2: {'x': 0.85, 'y': 2.5, 'z': 0.4, 'yaw': 0.0},
-            
-            # Tag 3: Cell (0,4) east edge, facing east
-            3: {'x': 0.85, 'y': 4.5, 'z': 0.4, 'yaw': 0.0},
-            
-            # Tag 4: Cell (2,2) south edge, facing south
-            4: {'x': 2.5, 'y': 2.15, 'z': 0.4, 'yaw': -1.5708},
-            
-            # Tag 5: Cell (4,2) west edge, facing west
-            5: {'x': 4.15, 'y': 2.5, 'z': 0.4, 'yaw': 3.14159},
+            # South wall (y = 0.01-0.02) - tags face NORTH (+Y)
+            0: {'x': 0.5, 'y': 0.02, 'z': 0.15, 'yaw': 1.5708},
+            1: {'x': 2.5, 'y': 0.02, 'z': 0.15, 'yaw': 1.5708},
+            2: {'x': 4.5, 'y': 0.02, 'z': 0.15, 'yaw': 1.5708},
+            # North wall (y = 4.98-4.99) - tags face SOUTH (-Y)
+            3: {'x': 0.5, 'y': 4.98, 'z': 0.15, 'yaw': -1.5708},
+            4: {'x': 2.5, 'y': 4.98, 'z': 0.15, 'yaw': -1.5708},
+            5: {'x': 4.5, 'y': 4.98, 'z': 0.15, 'yaw': -1.5708},
+            # West wall (x = 0.01-0.02) - tags face EAST (+X)
+            6: {'x': 0.02, 'y': 0.5, 'z': 0.15, 'yaw': 0.0},
+            7: {'x': 0.02, 'y': 2.5, 'z': 0.15, 'yaw': 0.0},
+            8: {'x': 0.02, 'y': 4.5, 'z': 0.15, 'yaw': 0.0},
+            # East wall (x = 4.98-4.99) - tags face WEST (-X)
+            9: {'x': 4.98, 'y': 0.5, 'z': 0.15, 'yaw': 3.14159},
+            10: {'x': 4.98, 'y': 2.5, 'z': 0.15, 'yaw': 3.14159},
+            11: {'x': 4.98, 'y': 4.5, 'z': 0.15, 'yaw': 3.14159},
+            # Obstacle (1,1) at world (1.5, 1.5) - 4 sides
+            12: {'x': 1.5, 'y': 1.05, 'z': 0.25, 'yaw': 1.5708},   # South, faces N
+            13: {'x': 1.5, 'y': 1.95, 'z': 0.25, 'yaw': -1.5708},  # North, faces S
+            14: {'x': 1.05, 'y': 1.5, 'z': 0.25, 'yaw': 0.0},      # West, faces E
+            15: {'x': 1.95, 'y': 1.5, 'z': 0.25, 'yaw': 3.14159},  # East, faces W
+            # Obstacle (1,2) at world (2.5, 1.5) - 4 sides
+            16: {'x': 2.5, 'y': 1.05, 'z': 0.25, 'yaw': 1.5708},
+            17: {'x': 2.5, 'y': 1.95, 'z': 0.25, 'yaw': -1.5708},
+            18: {'x': 2.05, 'y': 1.5, 'z': 0.25, 'yaw': 0.0},
+            19: {'x': 2.95, 'y': 1.5, 'z': 0.25, 'yaw': 3.14159},
+            # Obstacle (3,1) at world (1.5, 3.5) - 4 sides
+            20: {'x': 1.5, 'y': 3.05, 'z': 0.25, 'yaw': 1.5708},
+            21: {'x': 1.5, 'y': 3.95, 'z': 0.25, 'yaw': -1.5708},
+            22: {'x': 1.05, 'y': 3.5, 'z': 0.25, 'yaw': 0.0},
+            23: {'x': 1.95, 'y': 3.5, 'z': 0.25, 'yaw': 3.14159},
+            # Obstacle (3,3) at world (3.5, 3.5) - 4 sides
+            24: {'x': 3.5, 'y': 3.05, 'z': 0.25, 'yaw': 1.5708},
+            25: {'x': 3.5, 'y': 3.95, 'z': 0.25, 'yaw': -1.5708},
+            26: {'x': 3.05, 'y': 3.5, 'z': 0.25, 'yaw': 0.0},
+            27: {'x': 3.95, 'y': 3.5, 'z': 0.25, 'yaw': 3.14159},
         }
         
         # Camera intrinsics (will be updated from camera_info)
@@ -69,8 +88,8 @@ class AprilTagLocalizer(Node):
         self.cx = 160.0  # Default principal point
         self.cy = 120.0
         
-        # Tag size in meters
-        self.tag_size = 0.15
+        # Tag size in meters (updated to match world_spawner)
+        self.tag_size = 0.20
         
         # CV Bridge for image conversion
         self.bridge = CvBridge()

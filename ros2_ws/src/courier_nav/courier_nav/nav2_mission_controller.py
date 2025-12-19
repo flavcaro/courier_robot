@@ -48,9 +48,10 @@ class CellToCellController(Node):
         self.start_cell = (0, 0)
         self.goal_cell = (4, 2)
         
-        # === Robot State ===
-        self.robot_x = 0.5
-        self.robot_y = 0.5
+        # === Robot State (in ODOM frame) ===
+        # Robot spawns at world (0.5, 0.5) which is odom (0, 0)
+        self.robot_x = 0.0
+        self.robot_y = 0.0
         self.robot_yaw = 0.0
         
         # === Navigation State ===
@@ -62,13 +63,16 @@ class CellToCellController(Node):
         self.target_yaw = 0.0  # The EXACT angle we need (0, π/2, π, -π/2)
         
         # === Control Parameters - STRICT ===
-        self.rotation_speed = 0.5        # Aumentata
-        self.linear_speed = 0.25         # Aumentata
-        self.angle_tolerance = 0.05      # ~3 degrees
+        self.rotation_speed = 0.5        # Increased
+        self.linear_speed = 0.25         # Increased
+        self.angle_tolerance = 0.08      # ~4.5 degrees (slightly looser for stability)
         self.position_tolerance = 0.12   # 12cm
         
+        # Track rotation start to ensure we rotate at least a minimum time
+        self.rotation_start_time = None
+        
         # === LIDAR Parameters ===
-        self.front_distance = 0.5        # Default to close - assume obstacle until proven otherwise
+        self.front_distance = 5.0        # Start with large value until LIDAR data received
         self.obstacle_threshold = 0.50   # Stop if obstacle closer than 50cm
         self.lidar_received = False      # Track if we got LIDAR data
         
@@ -86,6 +90,7 @@ class CellToCellController(Node):
         self.marker_timer = self.create_timer(1.0, self.publish_markers)
         self.lidar_check_timer = self.create_timer(2.0, self.check_lidar)  # Check LIDAR
         self.startup_timer = self.create_timer(3.0, self.start_mission)
+        self.waypoint_timer = None  # One-shot timer for waypoint transitions
         
         self.get_logger().info('='*50)
         self.get_logger().info('STRICT ORTHOGONAL CONTROLLER')
@@ -100,15 +105,26 @@ class CellToCellController(Node):
             self.get_logger().info(f'LIDAR OK: front_distance = {self.front_distance:.2f}m')
 
     def cell_to_world(self, row, col):
-        """Convert grid cell (row, col) to world coordinates (x, y)."""
+        """Convert grid cell (row, col) to ODOM frame coordinates.
+        
+        Robot spawns at world (0.5, 0.5) which is odom (0, 0).
+        So odom_coord = world_coord - 0.5
+        """
+        # World coordinates (center of cell)
         world_x = (col + 0.5) * self.cell_size
         world_y = (row + 0.5) * self.cell_size
-        return world_x, world_y
+        # Convert to odom frame (robot spawns at world 0.5, 0.5 = odom 0, 0)
+        odom_x = world_x - 0.5
+        odom_y = world_y - 0.5
+        return odom_x, odom_y
     
-    def world_to_cell(self, x, y):
-        """Convert world coordinates to grid cell."""
-        col = int(x / self.cell_size)
-        row = int(y / self.cell_size)
+    def world_to_cell(self, odom_x, odom_y):
+        """Convert ODOM frame coordinates to grid cell."""
+        # Convert odom to world first
+        world_x = odom_x + 0.5
+        world_y = odom_y + 0.5
+        col = int(world_x / self.cell_size)
+        row = int(world_y / self.cell_size)
         return row, col
 
     def start_mission(self):
@@ -185,15 +201,24 @@ class CellToCellController(Node):
         dx = self.target_world_x - self.robot_x
         dy = self.target_world_y - self.robot_y
         
+        self.get_logger().info(f'Direction calc: dx={dx:.3f}, dy={dy:.3f}')
+        
         # Determine EXACT cardinal direction (0°, 90°, 180°, -90°)
-        if abs(dx) > abs(dy):
-            # Moving in X direction
+        # Use a threshold to avoid floating-point issues when dx or dy is near zero
+        threshold = 0.05  # 5cm threshold
+        
+        if abs(dx) < threshold and abs(dy) < threshold:
+            # Already at target? Keep current heading
+            self.get_logger().warn(f'Already near target! Keeping current heading.')
+            self.target_yaw = self.robot_yaw
+        elif abs(dx) > abs(dy):
+            # Moving primarily in X direction
             if dx > 0:
                 self.target_yaw = 0.0  # East (+X)
             else:
                 self.target_yaw = math.pi  # West (-X)
         else:
-            # Moving in Y direction
+            # Moving primarily in Y direction
             if dy > 0:
                 self.target_yaw = math.pi / 2  # North (+Y)
             else:
@@ -204,6 +229,7 @@ class CellToCellController(Node):
         self.get_logger().info(f'ROTATE TO: {math.degrees(self.target_yaw):.0f} deg (current: {math.degrees(self.robot_yaw):.0f} deg)')
         
         self.state = RobotState.ROTATING
+        self.rotation_start_time = self.get_clock().now()
 
     def odom_callback(self, msg):
         """Update robot pose from odometry."""
@@ -270,8 +296,10 @@ class CellToCellController(Node):
             self.handle_obstacle()
             return
         
-        # BOUNDARY CHECK: Don't go outside grid!
-        if self.robot_x < 0.1 or self.robot_x > 4.9 or self.robot_y < 0.1 or self.robot_y > 4.9:
+        # BOUNDARY CHECK: Don't go outside grid (odometry frame: -0.5 to 4.5)
+        # Robot spawns at world (0.5, 0.5) which is odom (0, 0)
+        # Grid is 5x5, so valid range in odom frame is approximately -0.4 to 4.4
+        if self.robot_x < -0.4 or self.robot_x > 4.4 or self.robot_y < -0.4 or self.robot_y > 4.4:
             self.stop_robot()
             self.get_logger().warn(f'BOUNDARY! Robot at ({self.robot_x:.2f}, {self.robot_y:.2f}) - backing up')
             self.handle_obstacle()
@@ -283,10 +311,20 @@ class CellToCellController(Node):
         if self.state == RobotState.ROTATING:
             angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
             
-            if abs(angle_error) < self.angle_tolerance:
+            # Calculate time spent rotating
+            rotation_elapsed = 0.0
+            if self.rotation_start_time is not None:
+                rotation_elapsed = (self.get_clock().now() - self.rotation_start_time).nanoseconds / 1e9
+            
+            self.get_logger().debug(f'ROTATING: target={math.degrees(self.target_yaw):.1f}° current={math.degrees(self.robot_yaw):.1f}° error={math.degrees(angle_error):.1f}° time={rotation_elapsed:.2f}s')
+            
+            # Only complete rotation after minimum time (0.2s) AND angle is correct
+            # This prevents false "done" when angle hasn't been updated yet
+            min_rotation_time = 0.2
+            if abs(angle_error) < self.angle_tolerance and rotation_elapsed > min_rotation_time:
                 # Rotation complete - FULL STOP before moving
                 self.stop_robot()
-                self.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(self.robot_yaw):.1f}° | LIDAR={self.front_distance:.2f}m')
+                self.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(self.robot_yaw):.1f}° target={math.degrees(self.target_yaw):.1f}° | LIDAR={self.front_distance:.2f}m')
                 
                 # CHECK LIDAR BEFORE MOVING!
                 if self.front_distance < self.obstacle_threshold:
@@ -295,6 +333,7 @@ class CellToCellController(Node):
                     return
                 
                 self.state = RobotState.MOVING
+                self.get_logger().info('>>> STATE: MOVING')
                 return
             
             # Rotate in place - NO linear velocity!
@@ -331,8 +370,10 @@ class CellToCellController(Node):
                 self.stop_robot()
                 self.get_logger().info(f'REACHED Cell{self.current_target}!')
                 self.state = RobotState.REACHED_WAYPOINT
-                # Go to next waypoint after short delay
-                self.create_timer(0.2, self.waypoint_reached_callback)
+                # Go to next waypoint after short delay (cancel any existing timer first)
+                if self.waypoint_timer is not None:
+                    self.waypoint_timer.cancel()
+                self.waypoint_timer = self.create_timer(0.3, self.waypoint_reached_callback)
                 return
             
             # Check if we've drifted off course
@@ -355,7 +396,12 @@ class CellToCellController(Node):
         self.cmd_vel_pub.publish(cmd)
 
     def waypoint_reached_callback(self):
-        """Called after reaching a waypoint."""
+        """Called after reaching a waypoint - one-shot timer callback."""
+        # Cancel timer to make it one-shot
+        if self.waypoint_timer is not None:
+            self.waypoint_timer.cancel()
+            self.waypoint_timer = None
+        
         if self.state == RobotState.REACHED_WAYPOINT:
             self.go_to_next_waypoint()
 

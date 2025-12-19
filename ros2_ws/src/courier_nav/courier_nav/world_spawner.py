@@ -179,42 +179,77 @@ class WorldSpawner(Node):
             self.spawn_sdf(f'x1_{row}_{col}', x_sdf, x, y, 0.55, 0.785)
             self.spawn_sdf(f'x2_{row}_{col}', x_sdf, x, y, 0.55, -0.785)
         
-        # 5. APRILTAG MARKERS (INSIDE the room, on the inner side of walls)
+        # 5. APRILTAG MARKERS (mounted ON walls - flat against surface)
         self.get_logger().info('Spawning AprilTag markers...')
-        # Positions: INSIDE the room, facing INWARD so robot can see them
-        apriltag_positions = [
-            # South wall INSIDE (y = 0.08) - tag faces NORTH into room
-            (0.5, 0.08, 1.57),     # Tag 0
-            (2.5, 0.08, 1.57),     # Tag 1
-            (4.5, 0.08, 1.57),     # Tag 2
-            # North wall INSIDE (y = 4.92) - tag faces SOUTH into room
-            (0.5, 4.92, -1.57),    # Tag 3
-            (2.5, 4.92, -1.57),    # Tag 4
-            (4.5, 4.92, -1.57),    # Tag 5
-            # West wall INSIDE (x = 0.08) - tag faces EAST into room
-            (0.08, 0.5, 0.0),      # Tag 6
-            (0.08, 2.5, 0.0),      # Tag 7
-            (0.08, 4.5, 0.0),      # Tag 8
-            # East wall INSIDE (x = 4.92) - tag faces WEST into room
-            (4.92, 0.5, 3.14),     # Tag 9
-            (4.92, 2.5, 3.14),     # Tag 10
-            (4.92, 4.5, 3.14),     # Tag 11
-        ]
+        # Wall-mounted tags: flat against wall surfaces, facing INTO the room
+        # Use different box dimensions based on wall orientation (no yaw rotation needed)
         
         tag_id = 0
-        for (x, y, yaw) in apriltag_positions:
-            # Pole
-            pole_sdf = self.get_cylinder_sdf(0.02, 0.35, 0.5, 0.5, 0.5)
-            self.spawn_sdf(f'pole_{tag_id}', pole_sdf, x, y, 0.175)
+        
+        # South wall (y = 0.01) - tags face NORTH, panel in XZ plane
+        for x_pos in [0.5, 2.5, 4.5]:
+            panel_sdf = self.get_box_sdf(0.20, 0.005, 0.20, 1.0, 1.0, 1.0)  # wide in X, thin in Y
+            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, x_pos, 0.01, 0.15)
+            pattern_sdf = self.get_box_sdf(0.14, 0.008, 0.14, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, x_pos, 0.02, 0.15)
+            tag_id += 1
+        
+        # North wall (y = 4.99) - tags face SOUTH, panel in XZ plane
+        for x_pos in [0.5, 2.5, 4.5]:
+            panel_sdf = self.get_box_sdf(0.20, 0.005, 0.20, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, x_pos, 4.99, 0.15)
+            pattern_sdf = self.get_box_sdf(0.14, 0.008, 0.14, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, x_pos, 4.98, 0.15)
+            tag_id += 1
+        
+        # West wall (x = 0.01) - tags face EAST, panel in YZ plane
+        for y_pos in [0.5, 2.5, 4.5]:
+            panel_sdf = self.get_box_sdf(0.005, 0.20, 0.20, 1.0, 1.0, 1.0)  # thin in X, wide in Y
+            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, 0.01, y_pos, 0.15)
+            pattern_sdf = self.get_box_sdf(0.008, 0.14, 0.14, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, 0.02, y_pos, 0.15)
+            tag_id += 1
+        
+        # East wall (x = 4.99) - tags face WEST, panel in YZ plane
+        for y_pos in [0.5, 2.5, 4.5]:
+            panel_sdf = self.get_box_sdf(0.005, 0.20, 0.20, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, 4.99, y_pos, 0.15)
+            pattern_sdf = self.get_box_sdf(0.008, 0.14, 0.14, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, 4.98, y_pos, 0.15)
+            tag_id += 1
+        
+        # Obstacle-mounted tags (vertical, on sides - flat against surface)
+        self.get_logger().info('Spawning AprilTags on obstacles...')
+        for (row, col) in self.obstacles:
+            x = col * self.cell_size + self.cell_size / 2
+            y = row * self.cell_size + self.cell_size / 2
             
-            # Tag panel (white background)
-            panel_sdf = self.get_box_sdf(0.15, 0.02, 0.15, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, x, y, 0.40, yaw)
+            # South side (y - 0.46) - faces NORTH, panel in XZ plane
+            panel_sdf = self.get_box_sdf(0.15, 0.005, 0.15, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x, y - 0.46, 0.25)
+            pattern_sdf = self.get_box_sdf(0.10, 0.008, 0.10, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x, y - 0.45, 0.25)
+            tag_id += 1
             
-            # Tag pattern (black square)
-            pattern_sdf = self.get_box_sdf(0.10, 0.025, 0.10, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, x, y, 0.40, yaw)
+            # North side (y + 0.46) - faces SOUTH, panel in XZ plane
+            panel_sdf = self.get_box_sdf(0.15, 0.005, 0.15, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x, y + 0.46, 0.25)
+            pattern_sdf = self.get_box_sdf(0.10, 0.008, 0.10, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x, y + 0.45, 0.25)
+            tag_id += 1
             
+            # West side (x - 0.46) - faces EAST, panel in YZ plane
+            panel_sdf = self.get_box_sdf(0.005, 0.15, 0.15, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x - 0.46, y, 0.25)
+            pattern_sdf = self.get_box_sdf(0.008, 0.10, 0.10, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x - 0.45, y, 0.25)
+            tag_id += 1
+            
+            # East side (x + 0.46) - faces WEST, panel in YZ plane
+            panel_sdf = self.get_box_sdf(0.005, 0.15, 0.15, 1.0, 1.0, 1.0)
+            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x + 0.46, y, 0.25)
+            pattern_sdf = self.get_box_sdf(0.008, 0.10, 0.10, 0.1, 0.1, 0.1)
+            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x + 0.45, y, 0.25)
             tag_id += 1
         
         # 6. START MARKER (green circle)
