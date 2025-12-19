@@ -20,6 +20,7 @@ from nav_msgs.msg import Odometry
 from tf2_ros import TransformBroadcaster
 import numpy as np
 import cv2
+import math
 from cv_bridge import CvBridge
 
 # Try to import pupil_apriltags, fall back to cv2.aruco
@@ -89,7 +90,7 @@ class AprilTagLocalizer(Node):
         self.cy = 120.0
         
         # Tag size in meters (updated to match world_spawner)
-        self.tag_size = 0.20
+        self.tag_size = 0.15
         
         # CV Bridge for image conversion
         self.bridge = CvBridge()
@@ -134,6 +135,12 @@ class AprilTagLocalizer(Node):
         
         # Detection counter for logging
         self.detection_count = 0
+        # Throttle logging to avoid flooding the console
+        self._last_detection_log = 0.0
+        self._detection_log_interval = 1.0  # seconds
+        # Throttle debug image publication
+        self._last_debug_img_time = 0.0
+        self._debug_img_interval = 0.5  # seconds
         
         self.get_logger().info('AprilTag Localizer started')
         self.get_logger().info(f'Known tags: {list(self.tag_positions.keys())}')
@@ -159,6 +166,10 @@ class AprilTagLocalizer(Node):
         
     def image_callback(self, msg):
         """Process camera image to detect AprilTags."""
+        if self.camera_matrix is None:
+            self.get_logger().warn('No camera_info yet — skipping image processing')
+            return
+        
         try:
             # Convert ROS image to OpenCV
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -285,14 +296,16 @@ class AprilTagLocalizer(Node):
             robot_pose = self.compute_robot_pose(tag_world, pose_t, pose_R)
             
             if robot_pose is not None:
-                self.publish_pose(robot_pose, tag_id, distance, stamp)
+                # Throttled info-level logging to keep console readable
+                now = self.get_clock().now().nanoseconds / 1e9
                 self.detection_count += 1
-                
-                if self.detection_count % 10 == 0:
+                if (now - self._last_detection_log) >= self._detection_log_interval or (self.detection_count % 10 == 0):
                     self.get_logger().info(
-                        f'Tag {tag_id} detected at distance {distance:.2f}m, '
-                        f'robot at ({robot_pose[0]:.2f}, {robot_pose[1]:.2f})'
+                        f'Detected Tag {tag_id} dist={distance:.2f}m -> '
+                        f'robot_est=({robot_pose[0]:.2f},{robot_pose[1]:.2f},{math.degrees(robot_pose[2]):.1f}deg)'
                     )
+                    self._last_detection_log = now
+                self.publish_pose(robot_pose, tag_id, distance, stamp)
     
     def compute_robot_pose(self, tag_world, pose_t, pose_R):
         """
@@ -351,7 +364,8 @@ class AprilTagLocalizer(Node):
         
         pose_msg = PoseWithCovarianceStamped()
         pose_msg.header.stamp = stamp
-        pose_msg.header.frame_id = 'odom'
+        # This pose is an estimate in the world/map frame
+        pose_msg.header.frame_id = 'map'
         
         pose_msg.pose.pose.position.x = x
         pose_msg.pose.pose.position.y = y
@@ -368,9 +382,34 @@ class AprilTagLocalizer(Node):
         pose_msg.pose.covariance[35] = 0.1  # yaw
         
         self.pose_pub.publish(pose_msg)
+        # Also broadcast a map->odom correction transform so the rest of the
+        # system (AMCL/Nav2) can use this as a pose correction.
+        try:
+            t = TransformStamped()
+            t.header.stamp = stamp
+            t.header.frame_id = 'map'
+            t.child_frame_id = 'odom'
+            t.transform.translation.x = float(x)
+            t.transform.translation.y = float(y)
+            t.transform.translation.z = 0.0
+            qz = float(np.sin(yaw / 2.0))
+            qw = float(np.cos(yaw / 2.0))
+            # Set quaternion (x,y) = 0 because we only rotate around Z
+            t.transform.rotation.x = 0.0
+            t.transform.rotation.y = 0.0
+            t.transform.rotation.z = qz
+            t.transform.rotation.w = qw
+            self.tf_broadcaster.sendTransform(t)
+            self.get_logger().debug(f'Broadcasted map->odom from tag {tag_id}: ({x:.2f},{y:.2f},{math.degrees(yaw):.1f}deg)')
+        except Exception as e:
+            self.get_logger().error(f'Failed to broadcast TF map->odom: {e}')
     
     def publish_debug_image(self, cv_image, detections, stamp):
         """Publish debug image with detected tags highlighted."""
+        # Throttle debug image publishing to avoid flooding topic and UI
+        now = self.get_clock().now().nanoseconds / 1e9
+        if (now - self._last_debug_img_time) < self._debug_img_interval:
+            return
         debug_img = cv_image.copy()
         
         for detection in detections:
@@ -402,6 +441,7 @@ class AprilTagLocalizer(Node):
             debug_msg.header.stamp = stamp
             debug_msg.header.frame_id = 'camera_link'
             self.debug_image_pub.publish(debug_msg)
+            self._last_debug_img_time = now
         except Exception as e:
             self.get_logger().error(f'Failed to publish debug image: {e}')
 

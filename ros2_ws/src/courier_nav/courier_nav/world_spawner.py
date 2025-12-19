@@ -57,8 +57,8 @@ class WorldSpawner(Node):
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                self.get_logger().info(f'Spawned: {name}')
-                return True
+            # Success: don't log every spawn to avoid flooding the console
+            return True
             else:
                 self.get_logger().warn(f'Failed to spawn {name}: {result.stderr}')
                 return False

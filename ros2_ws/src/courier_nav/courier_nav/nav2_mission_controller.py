@@ -139,10 +139,10 @@ class CellToCellController(Node):
         
         if path:
             self.path_queue = deque(path)
-            self.get_logger().info(f'PATH FOUND with {len(path)} waypoints:')
+            self.get_logger().info(f'PATH FOUND with {len(path)} waypoints')
             for i, cell in enumerate(path):
                 wx, wy = self.cell_to_world(cell[0], cell[1])
-                self.get_logger().info(f'   {i+1}. Cell{cell} -> World({wx:.2f}, {wy:.2f})')
+                self.get_logger().debug(f'   {i+1}. Cell{cell} -> World({wx:.2f}, {wy:.2f})')
             self.go_to_next_waypoint()
         else:
             self.get_logger().error('NO PATH FOUND!')
@@ -197,36 +197,53 @@ class CellToCellController(Node):
         row, col = self.current_target
         self.target_world_x, self.target_world_y = self.cell_to_world(row, col)
         
-        # Calculate direction to target
+        # Determine EXACT cardinal direction (0°, 90°, 180°, -90°)
+        # Prefer computing direction from discrete cell delta to avoid
+        # small odometry errors causing 'already at target' behaviour.
+        try:
+            current_cell = self.world_to_cell(self.robot_x, self.robot_y)
+        except Exception:
+            current_cell = None
+
+        target_row, target_col = self.current_target
+
+        # Default fallback uses world coordinates
         dx = self.target_world_x - self.robot_x
         dy = self.target_world_y - self.robot_y
-        
-        self.get_logger().info(f'Direction calc: dx={dx:.3f}, dy={dy:.3f}')
-        
-        # Determine EXACT cardinal direction (0°, 90°, 180°, -90°)
-        # Use a threshold to avoid floating-point issues when dx or dy is near zero
-        threshold = 0.05  # 5cm threshold
-        
-        if abs(dx) < threshold and abs(dy) < threshold:
-            # Already at target? Keep current heading
-            self.get_logger().warn(f'Already near target! Keeping current heading.')
-            self.target_yaw = self.robot_yaw
-        elif abs(dx) > abs(dy):
-            # Moving primarily in X direction
-            if dx > 0:
-                self.target_yaw = 0.0  # East (+X)
+
+        # Compute delta in grid space when possible
+        if current_cell is not None:
+            crow, ccol = current_cell
+            drow = target_row - crow
+            dcol = target_col - ccol
+
+            if dcol != 0:
+                # Horizontal move (col -> X)
+                if dcol > 0:
+                    self.target_yaw = 0.0
+                else:
+                    self.target_yaw = math.pi
+            elif drow != 0:
+                # Vertical move (row -> Y)
+                if drow > 0:
+                    self.target_yaw = math.pi / 2
+                else:
+                    self.target_yaw = -math.pi / 2
             else:
-                self.target_yaw = math.pi  # West (-X)
+                # We're in same cell according to odom - fall back to world dx/dy
+                if abs(dx) > abs(dy):
+                    self.target_yaw = 0.0 if dx > 0 else math.pi
+                else:
+                    self.target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
         else:
-            # Moving primarily in Y direction
-            if dy > 0:
-                self.target_yaw = math.pi / 2  # North (+Y)
+            # Fallback if world_to_cell failed
+            if abs(dx) > abs(dy):
+                self.target_yaw = 0.0 if dx > 0 else math.pi
             else:
-                self.target_yaw = -math.pi / 2  # South (-Y)
+                self.target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
         
-        self.get_logger().info('')
-        self.get_logger().info(f'TARGET: Cell{self.current_target} = ({self.target_world_x:.2f}, {self.target_world_y:.2f})')
-        self.get_logger().info(f'ROTATE TO: {math.degrees(self.target_yaw):.0f} deg (current: {math.degrees(self.robot_yaw):.0f} deg)')
+        self.get_logger().debug(f'TARGET: Cell{self.current_target} = ({self.target_world_x:.2f}, {self.target_world_y:.2f})')
+        self.get_logger().info(f'ROTATE TO: {math.degrees(self.target_yaw):.0f} deg')
         
         self.state = RobotState.ROTATING
         self.rotation_start_time = self.get_clock().now()
@@ -289,8 +306,11 @@ class CellToCellController(Node):
         if self.state == RobotState.REACHED_WAYPOINT:
             return
         
-        # SAFETY CHECK: Always check LIDAR first!
-        if self.front_distance < self.obstacle_threshold:
+        # If an obstacle is detected we should prevent forward motion,
+        # but rotation in place must be allowed so the robot can turn
+        # into the next corridor/cell. Only trigger emergency handling
+        # when not currently rotating in place.
+        if self.front_distance < self.obstacle_threshold and self.state != RobotState.ROTATING:
             self.stop_robot()
             self.get_logger().warn(f'EMERGENCY STOP! Obstacle at {self.front_distance:.2f}m')
             self.handle_obstacle()
@@ -324,7 +344,7 @@ class CellToCellController(Node):
             if abs(angle_error) < self.angle_tolerance and rotation_elapsed > min_rotation_time:
                 # Rotation complete - FULL STOP before moving
                 self.stop_robot()
-                self.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(self.robot_yaw):.1f}° target={math.degrees(self.target_yaw):.1f}° | LIDAR={self.front_distance:.2f}m')
+                self.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(self.robot_yaw):.1f}°')
                 
                 # CHECK LIDAR BEFORE MOVING!
                 if self.front_distance < self.obstacle_threshold:
@@ -360,9 +380,9 @@ class CellToCellController(Node):
             dy = self.target_world_y - self.robot_y
             distance = math.sqrt(dx*dx + dy*dy)
             
-            # Log periodically
-            if not hasattr(self, '_last_log') or (self.get_clock().now().nanoseconds - self._last_log) > 500000000:
-                self.get_logger().info(f'Moving: dist={distance:.2f}m | LIDAR={self.front_distance:.2f}m')
+            # Log less frequently to reduce console spam (every 2s)
+            if not hasattr(self, '_last_log') or (self.get_clock().now().nanoseconds - self._last_log) > 2_000_000_000:
+                self.get_logger().debug(f'Moving: dist={distance:.2f}m | LIDAR={self.front_distance:.2f}m')
                 self._last_log = self.get_clock().now().nanoseconds
             
             if distance < self.position_tolerance:
@@ -380,7 +400,7 @@ class CellToCellController(Node):
             angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
             if abs(angle_error) > 0.15:  # ~8.5 degrees
                 # Re-align!
-                self.get_logger().warn(f'DRIFT! Re-aligning...')
+                self.get_logger().debug('DRIFT detected - re-aligning')
                 self.stop_robot()
                 self.state = RobotState.ROTATING
                 return
