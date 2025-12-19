@@ -72,16 +72,16 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
         logger = self.blackboard.get("logger")
         
         # Convert cell to world coordinates
-        # Grid uses (row, col) where row->x and col->y
+        # Grid uses (row, col) where row -> Y and col -> X (row is north/south)
         row, col = target_cell
-        x = (row + 0.5) * cell_size  # Center of cell
-        y = (col + 0.5) * cell_size
+        x = (col + 0.5) * cell_size  # Center of cell (col -> X)
+        y = (row + 0.5) * cell_size  # (row -> Y)
         
         logger.info(f"[{self.name}] Navigating to cell {target_cell} -> ({x:.2f}, {y:.2f})")
         
-        # Create goal pose (using odom frame for odometry-based navigation)
+        # Create goal pose in the map frame for Nav2 global planning
         goal_pose = PoseStamped()
-        goal_pose.header.frame_id = 'odom'
+        goal_pose.header.frame_id = 'map'
         goal_pose.header.stamp = self.blackboard.get("node").get_clock().now().to_msg()
         goal_pose.pose.position.x = x
         goal_pose.pose.position.y = y
@@ -124,9 +124,9 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
         """Handle navigation feedback."""
         feedback = feedback_msg.feedback
         logger = self.blackboard.get("logger")
-        # Log distance remaining periodically
+        # Log distance remaining at debug level to avoid flooding the console
         dist = feedback.distance_remaining
-        logger.info(f"[{self.name}] Distance remaining: {dist:.2f}m")
+        logger.debug(f"[{self.name}] Distance remaining: {dist:.2f}m")
         
     def _result_callback(self, future):
         """Handle navigation completion."""
@@ -314,22 +314,50 @@ class PlanReturnPath(py_trees.behaviour.Behaviour):
     def update(self):
         logger = self.blackboard.get("logger")
         start_cell = self.blackboard.get("start_cell")
-        
-        # Return path: (2,4) -> (1,4) -> (0,4) -> (0,3) -> (0,2) -> (0,1) -> (0,0)
-        # Reverse of outbound path, staying in safe column x=0 and top row y=4
-        return_path = [
-            (1, 4),  # Move left along y=4
-            (0, 4),  # Top-left corner
-            (0, 3),  # Move down along x=0
-            (0, 2),  # Continue down
-            (0, 1),  # Continue down
-            start_cell,  # Arrive at start (0,0)
-        ]
-        
+        grid_size = 5
+
+        # Determine current cell: prefer explicit blackboard 'current_target' (last reached),
+        # otherwise fallback to start_cell.
+        current = self.blackboard.get("current_target")
+        if current is None:
+            current = start_cell
+
+        # Obstacles from blackboard (list of (row,col))
+        obstacles = set(self.blackboard.get("obstacles") or [])
+
+        # BFS from current -> start_cell on a 4-connected grid
+        from collections import deque
+
+        def bfs(start, goal):
+            if start == goal:
+                return []
+            dirs = [(1, 0), (-1, 0), (0, -1), (0, 1)]
+            q = deque([(start, [start])])
+            visited = {start}
+            while q:
+                (r, c), path = q.popleft()
+                for dr, dc in dirs:
+                    nr, nc = r + dr, c + dc
+                    nxt = (nr, nc)
+                    if not (0 <= nr < grid_size and 0 <= nc < grid_size):
+                        continue
+                    if nxt in obstacles or nxt in visited:
+                        continue
+                    new_path = path + [nxt]
+                    if nxt == goal:
+                        return new_path[1:]
+                    visited.add(nxt)
+                    q.append((nxt, new_path))
+            return []
+
+        return_path = bfs(current, start_cell)
+        if not return_path:
+            logger.warn(f'[{self.name}] No return path found from {current} to {start_cell}')
+            return py_trees.common.Status.FAILURE
+
         self.blackboard.set("path_queue", return_path)
         self.blackboard.set("return_planned", True)
-        
-        logger.info(f"[{self.name}] Return path set: {return_path}")
+        logger.info(f"[{self.name}] Return path set (dynamic BFS): {return_path}")
         return py_trees.common.Status.SUCCESS
 
 
@@ -407,6 +435,37 @@ def create_courier_behavior_tree():
         └── Deliver Object
     """
     
+    # Initialize blackboard defaults and logger so behaviors have sensible keys
+    import logging
+    bb = py_trees.blackboard.Blackboard()
+    # Setup a simple logger for the behavior tree and put it on the blackboard
+    logger = logging.getLogger('courier_bt')
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+        logger.addHandler(ch)
+    bb.set('logger', logger)
+
+    # Default blackboard state (can be overridden by mission controller)
+    if bb.get('object_collected') is None:
+        bb.set('object_collected', False)
+    if bb.get('return_planned') is None:
+        bb.set('return_planned', False)
+    if bb.get('path_queue') is None:
+        bb.set('path_queue', [])
+    if bb.get('start_cell') is None:
+        bb.set('start_cell', (0, 0))
+    if bb.get('cell_size') is None:
+        bb.set('cell_size', 1.0)
+    if bb.get('obstacles') is None:
+        # Default obstacles match world_spawner / mission controller
+        bb.set('obstacles', [(1, 1), (1, 2), (3, 1), (3, 3)])
+    if bb.get('battery_level') is None:
+        bb.set('battery_level', 100.0)
+    if bb.get('mission_complete') is None:
+        bb.set('mission_complete', False)
+
     # Root selector - either mission is complete, or we work on it
     root = py_trees.composites.Selector(name="Root", memory=False)
     
