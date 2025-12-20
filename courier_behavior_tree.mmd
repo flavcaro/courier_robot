@@ -1,0 +1,86 @@
+%% Courier Robot Behavior Tree
+%% Generated from courier_behavior_tree.py
+%% 
+%% Node Types:
+%% - Selector: ? (try children in order until one succeeds)
+%% - Sequence: → (execute children in order, fail if any fails)
+%% - Decorator: ↻ (modifies child behavior)
+%% - Condition: ◇ (check/test)
+%% - Action: ▢ (do something)
+
+flowchart TD
+    Root["Root<br/>?(Selector)"]
+    
+    %% Left branch - Mission Complete Check
+    MissionDone["Mission Done?<br/>◇(Condition)"]
+    
+    %% Right branch - Main Mission
+    MainMission["Main Mission<br/>→(Sequence)"]
+    
+    %% Battery Check
+    BatteryCheck["Check Battery<br/>◇(min_level: 10%)"]
+    
+    %% Go To Pickup
+    GoToPickup["Go To Pickup<br/>?(Selector)"]
+    AlreadyAtPickup["Already Collected?<br/>◇(Condition)"]
+    RepeatPickupNav["Repeat Pickup Nav<br/>↻(Repeat: -1)"]
+    NavToPickup["Navigate To Pickup<br/>→(Sequence)"]
+    GetWaypointPickup["Get Pickup Waypoint<br/>▢(Action)"]
+    Nav2ToPickup["Nav2 To Pickup<br/>▢(Navigate with Nav2)"]
+    
+    %% Collect Object
+    CollectSelector["Collect Selector<br/>?(Selector)"]
+    AlreadyCollected["Object Collected?<br/>◇(Condition)"]
+    CollectObject["Collect Object<br/>▢(4s animation)"]
+    
+    %% Plan Return
+    PlanReturn["Plan Return<br/>?(Selector)"]
+    ReturnPlanned["Return Planned?<br/>◇(Condition)"]
+    PlanReturnPath["Plan Return Path<br/>▢(BFS pathfinding)"]
+    
+    %% Navigate Home
+    NavHome["Navigate Home<br/>→(Sequence)"]
+    GetWaypointHome["Get Home Waypoint<br/>▢(Action)"]
+    Nav2ToHome["Nav2 To Home<br/>▢(Navigate with Nav2)"]
+    
+    %% Deliver Object
+    Deliver["Deliver Object<br/>▢(4s animation)"]
+    
+    %% Connections
+    Root --> MissionDone
+    Root --> MainMission
+    
+    MainMission --> BatteryCheck
+    MainMission --> GoToPickup
+    MainMission --> CollectSelector
+    MainMission --> PlanReturn
+    MainMission --> NavHome
+    MainMission --> Deliver
+    
+    GoToPickup --> AlreadyAtPickup
+    GoToPickup --> RepeatPickupNav
+    RepeatPickupNav --> NavToPickup
+    NavToPickup --> GetWaypointPickup
+    NavToPickup --> Nav2ToPickup
+    
+    CollectSelector --> AlreadyCollected
+    CollectSelector --> CollectObject
+    
+    PlanReturn --> ReturnPlanned
+    PlanReturn --> PlanReturnPath
+    
+    NavHome --> GetWaypointHome
+    NavHome --> Nav2ToHome
+    
+    %% Styling
+    classDef selector fill:#FF9999,stroke:#CC0000,stroke-width:3px,color:#000
+    classDef sequence fill:#99CCFF,stroke:#0066CC,stroke-width:3px,color:#000
+    classDef decorator fill:#FFD699,stroke:#FF8C00,stroke-width:3px,color:#000
+    classDef condition fill:#99DD99,stroke:#228B22,stroke-width:2px,color:#000
+    classDef action fill:#CC99FF,stroke:#6600CC,stroke-width:2px,color:#000
+    
+    class Root,GoToPickup,CollectSelector,PlanReturn selector
+    class MainMission,NavToPickup,NavHome sequence
+    class RepeatPickupNav decorator
+    class MissionDone,AlreadyAtPickup,BatteryCheck,AlreadyCollected,ReturnPlanned condition
+    class GetWaypointPickup,Nav2ToPickup,CollectObject,PlanReturnPath,GetWaypointHome,Nav2ToHome,Deliver action
