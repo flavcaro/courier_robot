@@ -3,14 +3,15 @@
 echo "=== Avvio Missione Courier Robot con Nav2 ==="
 echo ""
 
-# Usa la path corretta dentro il container
-cd /home/ubuntu/ros2_ws || exit
+# Ottieni il path dello script e vai alla directory del workspace
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR" || exit
 
 # Verifica e installa dipendenze Python
 echo "📦 Verifica dipendenze Python..."
 if ! python3 -c "import py_trees" 2>/dev/null; then
     echo "⚠️  py_trees non trovato. Installazione in corso..."
-    pip install --break-system-packages py_trees>=2.2.0
+    pip3 install --user py_trees>=2.2.0
     echo "✅ py_trees installato!"
 fi
 
@@ -18,7 +19,7 @@ fi
 echo "📦 Verifica OpenCV per AprilTag..."
 if ! python3 -c "import cv2" 2>/dev/null; then
     echo "⚠️  OpenCV non trovato. Installazione in corso..."
-    pip install --break-system-packages "numpy>=1.21.6,<1.28.0" opencv-python
+    pip3 install --user "numpy>=1.21.6,<1.28.0" opencv-python
     echo "✅ OpenCV installato!"
 fi
 
@@ -90,7 +91,7 @@ sleep 2
 
 # 3. Spawna il robot
 echo "3️⃣  Spawning robot..."
-ros2 run ros_gz_sim create -world empty -file /home/ubuntu/ros2_ws/robot.sdf -name courier_robot -x 0.5 -y 0.5 -z 0.15
+ros2 run ros_gz_sim create -world empty -file "$SCRIPT_DIR/robot.sdf" -name courier_robot -x 0.5 -y 0.5 -z 0.15
 sleep 3
 
 # 4. Pubblica static transforms
