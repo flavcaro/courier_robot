@@ -198,8 +198,26 @@ class CellToCellController(Node):
     def go_to_next_waypoint(self):
         """Set next target cell and calculate EXACT required angle."""
         if not self.path_queue:
-            # Check if we reached the goal for the first time
+            # Check which phase of the mission we're in
             current_cell = self.world_to_cell(self.robot_x, self.robot_y)
+            
+            # If we're returning home and path is empty, check if we arrived
+            if self.state == RobotState.RETURNING_HOME or self.returning_home:
+                if current_cell == self.start_cell:
+                    self.get_logger().info('='*50)
+                    self.get_logger().info('RETURNED HOME! Delivering object...')
+                    self.get_logger().info('='*50)
+                    self.stop_robot()
+                    self.state = RobotState.DELIVERING_OBJECT
+                    self.animation_start_time = self.get_clock().now()
+                    self.animation_step = 0
+                    return
+                else:
+                    self.get_logger().error(f'Return path empty but not at home! At {current_cell}, home is {self.start_cell}')
+                    self.state = RobotState.MISSION_COMPLETE
+                    return
+            
+            # If we haven't collected the object yet, check if we reached goal
             if not self.object_collected and current_cell == self.goal_cell:
                 self.get_logger().info('='*50)
                 self.get_logger().info('REACHED GOAL! Collecting object...')
@@ -209,23 +227,14 @@ class CellToCellController(Node):
                 self.animation_start_time = self.get_clock().now()
                 self.animation_step = 0
                 return
-            # Check if we returned home
-            elif self.object_collected and current_cell == self.start_cell:
-                self.get_logger().info('='*50)
-                self.get_logger().info('RETURNED HOME! Delivering object...')
-                self.get_logger().info('='*50)
-                self.stop_robot()
-                self.state = RobotState.DELIVERING_OBJECT
-                self.animation_start_time = self.get_clock().now()
-                self.animation_step = 0
-                return
-            else:
-                self.get_logger().info('='*50)
-                self.get_logger().info('MISSION COMPLETE!')
-                self.get_logger().info('='*50)
-                self.stop_robot()
-                self.state = RobotState.MISSION_COMPLETE
-                return
+            
+            # Otherwise mission complete (or error)
+            self.get_logger().info('='*50)
+            self.get_logger().info('MISSION COMPLETE!')
+            self.get_logger().info('='*50)
+            self.stop_robot()
+            self.state = RobotState.MISSION_COMPLETE
+            return
         
         self.current_target = self.path_queue.popleft()
         row, col = self.current_target
@@ -490,13 +499,21 @@ class CellToCellController(Node):
         self.get_logger().info(f'Current position: ({self.robot_x:.2f}, {self.robot_y:.2f}) = Cell{current_cell}')
         self.get_logger().info(f'Obstacles now: {self.obstacles}')
 
-        new_path = self.bfs_path(current_cell, self.goal_cell)
+        # Determine target based on current mission phase
+        if self.returning_home or self.state == RobotState.RETURNING_HOME:
+            target = self.start_cell
+            self.get_logger().info(f'Replanning RETURN path to {target}')
+        else:
+            target = self.goal_cell
+            self.get_logger().info(f'Replanning path to goal {target}')
+
+        new_path = self.bfs_path(current_cell, target)
         if new_path:
             self.path_queue = deque(new_path)
             self.get_logger().info(f'NEW PATH: {list(self.path_queue)}')
             self.go_to_next_waypoint()
         else:
-            self.get_logger().error('NO PATH AVAILABLE! Mission failed.')
+            self.get_logger().error(f'NO PATH AVAILABLE to {target}! Mission failed.')
             self.state = RobotState.MISSION_COMPLETE
 
     def stop_robot(self):
