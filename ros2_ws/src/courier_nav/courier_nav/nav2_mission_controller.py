@@ -20,6 +20,7 @@ from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker, MarkerArray
 
 import math
+import time
 from enum import Enum
 from collections import deque
 
@@ -29,7 +30,11 @@ class RobotState(Enum):
     ROTATING = 1
     MOVING = 2
     REACHED_WAYPOINT = 3
-    MISSION_COMPLETE = 4
+    COLLECTING_OBJECT = 4
+    PLANNING_RETURN = 5
+    RETURNING_HOME = 6
+    DELIVERING_OBJECT = 7
+    MISSION_COMPLETE = 8
 
 
 class CellToCellController(Node):
@@ -44,9 +49,15 @@ class CellToCellController(Node):
         # Obstacles as (row, col) - row is Y, col is X in world
         self.obstacles = {(1, 1), (1, 2), (3, 1), (3, 3)}
         
-        # Mission: start (0,0) -> goal (4,2)
+        # Mission: start (0,0) -> goal (4,2) -> back to start
         self.start_cell = (0, 0)
         self.goal_cell = (4, 2)
+        self.object_collected = False
+        self.returning_home = False
+        
+        # Animation tracking
+        self.animation_start_time = None
+        self.animation_step = 0
         
         # === Robot State (in ODOM frame) ===
         # Robot spawns at world (0.5, 0.5) which is odom (0, 0)
@@ -91,10 +102,11 @@ class CellToCellController(Node):
         self.lidar_check_timer = self.create_timer(2.0, self.check_lidar)  # Check LIDAR
         self.startup_timer = self.create_timer(3.0, self.start_mission)
         self.waypoint_timer = None  # One-shot timer for waypoint transitions
+        self.animation_timer = self.create_timer(0.5, self.animation_loop)  # Animation updates
         
         self.get_logger().info('='*50)
-        self.get_logger().info('STRICT ORTHOGONAL CONTROLLER')
-        self.get_logger().info(f'Start: {self.start_cell} -> Goal: {self.goal_cell}')
+        self.get_logger().info('COURIER ROBOT MISSION CONTROLLER')
+        self.get_logger().info(f'Mission: Start {self.start_cell} -> Pickup {self.goal_cell} -> Return {self.start_cell}')
         self.get_logger().info('='*50)
 
     def check_lidar(self):
@@ -186,12 +198,34 @@ class CellToCellController(Node):
     def go_to_next_waypoint(self):
         """Set next target cell and calculate EXACT required angle."""
         if not self.path_queue:
-            self.get_logger().info('='*50)
-            self.get_logger().info('MISSION COMPLETE!')
-            self.get_logger().info('='*50)
-            self.stop_robot()
-            self.state = RobotState.MISSION_COMPLETE
-            return
+            # Check if we reached the goal for the first time
+            current_cell = self.world_to_cell(self.robot_x, self.robot_y)
+            if not self.object_collected and current_cell == self.goal_cell:
+                self.get_logger().info('='*50)
+                self.get_logger().info('REACHED GOAL! Collecting object...')
+                self.get_logger().info('='*50)
+                self.stop_robot()
+                self.state = RobotState.COLLECTING_OBJECT
+                self.animation_start_time = self.get_clock().now()
+                self.animation_step = 0
+                return
+            # Check if we returned home
+            elif self.object_collected and current_cell == self.start_cell:
+                self.get_logger().info('='*50)
+                self.get_logger().info('RETURNED HOME! Delivering object...')
+                self.get_logger().info('='*50)
+                self.stop_robot()
+                self.state = RobotState.DELIVERING_OBJECT
+                self.animation_start_time = self.get_clock().now()
+                self.animation_step = 0
+                return
+            else:
+                self.get_logger().info('='*50)
+                self.get_logger().info('MISSION COMPLETE!')
+                self.get_logger().info('='*50)
+                self.stop_robot()
+                self.state = RobotState.MISSION_COMPLETE
+                return
         
         self.current_target = self.path_queue.popleft()
         row, col = self.current_target
@@ -304,6 +338,15 @@ class CellToCellController(Node):
             return
         
         if self.state == RobotState.REACHED_WAYPOINT:
+            return
+        
+        if self.state == RobotState.COLLECTING_OBJECT:
+            return
+        
+        if self.state == RobotState.PLANNING_RETURN:
+            return
+        
+        if self.state == RobotState.DELIVERING_OBJECT:
             return
         
         # If an obstacle is detected we should prevent forward motion,
@@ -477,6 +520,91 @@ class CellToCellController(Node):
                     pass
                 break
 
+    def animation_loop(self):
+        """Non-blocking animation loop for gripper actions."""
+        if self.state == RobotState.COLLECTING_OBJECT:
+            if self.animation_start_time is None:
+                return
+            
+            elapsed = (self.get_clock().now() - self.animation_start_time).nanoseconds / 1e9
+            
+            # 4-step animation: 1s each step
+            if elapsed < 1.0 and self.animation_step == 0:
+                self.get_logger().info('🤖 Activating gripper...')
+                self.get_logger().info('   Opening gripper...')
+                self.animation_step = 1
+            elif 1.0 <= elapsed < 2.0 and self.animation_step == 1:
+                self.get_logger().info('   Lowering arm...')
+                self.animation_step = 2
+            elif 2.0 <= elapsed < 3.0 and self.animation_step == 2:
+                self.get_logger().info('   Closing gripper...')
+                self.animation_step = 3
+            elif 3.0 <= elapsed < 4.0 and self.animation_step == 3:
+                self.get_logger().info('   Lifting arm...')
+                self.animation_step = 4
+            elif elapsed >= 4.0 and self.animation_step == 4:
+                self.get_logger().info('✅ Object collected!')
+                self.object_collected = True
+                self.animation_start_time = None
+                self.animation_step = 0
+                self.state = RobotState.PLANNING_RETURN
+                # Plan return path immediately
+                self.plan_return_path()
+                
+        elif self.state == RobotState.DELIVERING_OBJECT:
+            if self.animation_start_time is None:
+                return
+            
+            elapsed = (self.get_clock().now() - self.animation_start_time).nanoseconds / 1e9
+            
+            # 4-step animation: 1s each step
+            if elapsed < 1.0 and self.animation_step == 0:
+                self.get_logger().info('📦 Delivering object...')
+                self.get_logger().info('   Lowering arm...')
+                self.animation_step = 1
+            elif 1.0 <= elapsed < 2.0 and self.animation_step == 1:
+                self.get_logger().info('   Opening gripper...')
+                self.animation_step = 2
+            elif 2.0 <= elapsed < 3.0 and self.animation_step == 2:
+                self.get_logger().info('   Releasing object...')
+                self.animation_step = 3
+            elif 3.0 <= elapsed < 4.0 and self.animation_step == 3:
+                self.get_logger().info('   Raising arm...')
+                self.animation_step = 4
+            elif elapsed >= 4.0 and self.animation_step == 4:
+                self.get_logger().info('✅ Object delivered!')
+                self.get_logger().info('='*50)
+                self.get_logger().info('🎉 MISSION COMPLETE!')
+                self.get_logger().info('='*50)
+                self.animation_start_time = None
+                self.animation_step = 0
+                self.state = RobotState.MISSION_COMPLETE
+    
+    def plan_return_path(self):
+        """Plan path back to starting cell."""
+        self.get_logger().info('='*50)
+        self.get_logger().info('PLANNING RETURN PATH TO HOME')
+        self.get_logger().info('='*50)
+        
+        current_cell = self.world_to_cell(self.robot_x, self.robot_y)
+        self.get_logger().info(f'Current: {current_cell} -> Home: {self.start_cell}')
+        
+        # Calculate BFS path back to start
+        path = self.bfs_path(current_cell, self.start_cell)
+        
+        if path:
+            self.path_queue = deque(path)
+            self.returning_home = True
+            self.get_logger().info(f'RETURN PATH FOUND with {len(path)} waypoints')
+            for i, cell in enumerate(path):
+                wx, wy = self.cell_to_world(cell[0], cell[1])
+                self.get_logger().info(f'  {i+1}. Cell{cell} -> ({wx:.2f}, {wy:.2f})')
+            self.state = RobotState.RETURNING_HOME
+            self.go_to_next_waypoint()
+        else:
+            self.get_logger().error('NO RETURN PATH FOUND!')
+            self.state = RobotState.MISSION_COMPLETE
+    
     def publish_markers(self):
         """Publish visualization markers."""
         marker_array = MarkerArray()

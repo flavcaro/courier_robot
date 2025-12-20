@@ -241,6 +241,7 @@
                 <always_on>1</always_on>
                 <visualize>true</visualize>
                 <topic>scan</topic>
+                <gz_frame_id>lidar_link</gz_frame_id>
             </sensor>
         </link>
         <joint name='lidar_joint' type='fixed'>

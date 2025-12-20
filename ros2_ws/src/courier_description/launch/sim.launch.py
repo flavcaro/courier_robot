@@ -73,7 +73,7 @@ def generate_launch_description():
 
             '/odom@nav_msgs/msg/Odometry@gz.msgs.Odometry',
 
-            # Lidar: Gazebo -> ROS (gpu_lidar uses LaserScan)
+            # Lidar: Gazebo -> ROS (gpu_lidar uses LaserScan with fixed frame_id)
 
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
 
