@@ -3,7 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -194,6 +194,12 @@ def generate_launch_description():
             'node_names': lifecycle_nodes
         }])
 
+    # Delay lifecycle manager bringup to allow sensors/TF to initialize
+    lifecycle_manager_timer = TimerAction(
+        period=10.0,
+        actions=[lifecycle_manager_node]
+    )
+
     # Static transform publisher for map -> odom (if not using AMCL)
     # Uncomment if you want to test without localization
     # static_tf_node = Node(
@@ -221,5 +227,5 @@ def generate_launch_description():
         bt_navigator_node,
         waypoint_follower_node,
         velocity_smoother_node,
-        lifecycle_manager_node,
+        lifecycle_manager_timer,
     ])

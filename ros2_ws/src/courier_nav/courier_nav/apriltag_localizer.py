@@ -456,8 +456,18 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        # Defensive cleanup: destroy node if still present and shutdown rclpy.
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+
+        try:
+            # rclpy.shutdown() can raise if shutdown was already called elsewhere
+            rclpy.shutdown()
+        except Exception:
+            # Ignore shutdown errors (double shutdown may occur during tests/launch)
+            pass
 
 
 if __name__ == '__main__':

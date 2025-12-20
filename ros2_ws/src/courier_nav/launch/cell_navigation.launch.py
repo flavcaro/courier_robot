@@ -77,8 +77,8 @@ def generate_launch_description():
         actions=[
             Node(
                 package='courier_nav',
-                executable='nav2_mission_controller',
-                name='cell_to_cell_controller',
+                executable='courier_controller',
+                name='courier_controller',
                 output='screen',
                 parameters=[{'use_sim_time': True}]
             )

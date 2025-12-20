@@ -18,6 +18,61 @@ from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
 
 import math
+import time
+import logging
+
+
+# Lightweight behavior-tree logger adapter that prefixes messages and throttles
+class BTLoggerAdapter:
+    def __init__(self, raw_logger, min_interval: float = 1.0):
+        self.raw = raw_logger
+        self.min_interval = float(min_interval)
+        self._last_emit = {}
+
+    def _should_emit(self, key: str) -> bool:
+        now = time.time()
+        last = self._last_emit.get(key, 0.0)
+        if (now - last) >= self.min_interval:
+            self._last_emit[key] = now
+            return True
+        return False
+
+    def info(self, msg: str, key: str | None = None):
+        k = key or msg
+        if self._should_emit(k):
+            try:
+                self.raw.info(f"[BT] {msg}")
+            except Exception:
+                logging.getLogger('courier_bt').info(msg)
+
+    def warn(self, msg: str, key: str | None = None):
+        k = key or msg
+        if self._should_emit(k):
+            try:
+                self.raw.warn(f"[BT] {msg}")
+            except Exception:
+                logging.getLogger('courier_bt').warning(msg)
+
+    def debug(self, msg: str, key: str | None = None):
+        k = key or msg
+        if self._should_emit(k):
+            try:
+                # Prefer debug-level emission when available
+                if hasattr(self.raw, 'debug'):
+                    self.raw.debug(f"[BT] {msg}")
+                else:
+                    self.raw.info(f"[BT] {msg}")
+            except Exception:
+                logging.getLogger('courier_bt').debug(msg)
+
+
+def get_bt_logger_from_blackboard(blackboard):
+    raw = blackboard.get('logger')
+    if raw is None:
+        return BTLoggerAdapter(logging.getLogger('courier_bt'))
+    if isinstance(raw, BTLoggerAdapter):
+        return raw
+    return BTLoggerAdapter(raw)
 
 
 # ============================================================================
@@ -69,7 +124,7 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
             
         cell_size = self.blackboard.get("cell_size")
         nav2_client = self.blackboard.get("nav2_client")
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         
         # Convert cell to world coordinates
         # Grid uses (row, col) where row -> Y and col -> X (row is north/south)
@@ -101,7 +156,7 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
     def _goal_response_callback(self, future):
         """Handle goal acceptance/rejection from Nav2."""
         self.goal_handle = future.result()
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         
         # Share goal handle with mission controller for obstacle handling
         node = self.blackboard.get("node")
@@ -123,7 +178,7 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
     def _feedback_callback(self, feedback_msg):
         """Handle navigation feedback."""
         feedback = feedback_msg.feedback
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         # Log distance remaining at debug level to avoid flooding the console
         dist = feedback.distance_remaining
         logger.debug(f"[{self.name}] Distance remaining: {dist:.2f}m")
@@ -136,7 +191,7 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
         self.navigation_complete = True
         self.navigation_succeeded = (status == GoalStatus.STATUS_SUCCEEDED)
         
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         if self.navigation_succeeded:
             logger.info(f"[{self.name}] Navigation succeeded!")
         else:
@@ -156,7 +211,7 @@ class NavigateToCell(py_trees.behaviour.Behaviour):
         """Called when behavior transitions away from RUNNING."""
         # Cancel navigation if we're being preempted
         if self.goal_handle is not None and not self.navigation_complete:
-            logger = self.blackboard.get("logger")
+            logger = get_bt_logger_from_blackboard(self.blackboard)
             logger.info(f"[{self.name}] Cancelling navigation")
             self.goal_handle.cancel_goal_async()
 
@@ -175,7 +230,7 @@ class GetNextWaypoint(py_trees.behaviour.Behaviour):
         
     def update(self):
         path_queue = self.blackboard.get("path_queue")
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         
         if not path_queue:
             logger.info(f"[{self.name}] Path queue empty")
@@ -220,7 +275,7 @@ class CheckBattery(py_trees.behaviour.Behaviour):
         
     def update(self):
         battery = self.blackboard.get("battery_level")
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         
         if battery >= self.min_level:
             return py_trees.common.Status.SUCCESS
@@ -241,16 +296,16 @@ class CollectObject(py_trees.behaviour.Behaviour):
         
     def initialise(self):
         self.collection_time = 0
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         logger.info(f"[{self.name}] Starting object collection...")
         
     def update(self):
         self.collection_time += 1
-        
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         # Simulate collection taking 2 seconds (20 ticks at 10Hz)
         if self.collection_time >= 20:
             self.blackboard.set("object_collected", True)
-            logger = self.blackboard.get("logger")
+            logger = get_bt_logger_from_blackboard(self.blackboard)
             logger.info(f"[{self.name}] Object collected!")
             return py_trees.common.Status.SUCCESS
             
@@ -284,7 +339,7 @@ class DeliverObject(py_trees.behaviour.Behaviour):
         
     def initialise(self):
         self.delivery_time = 0
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         logger.info(f"[{self.name}] Starting delivery...")
         
     def update(self):
@@ -293,7 +348,7 @@ class DeliverObject(py_trees.behaviour.Behaviour):
         if self.delivery_time >= 20:
             self.blackboard.set("object_collected", False)
             self.blackboard.set("mission_complete", True)
-            logger = self.blackboard.get("logger")
+            logger = get_bt_logger_from_blackboard(self.blackboard)
             logger.info(f"[{self.name}] Object delivered! Mission complete!")
             return py_trees.common.Status.SUCCESS
             
@@ -312,7 +367,7 @@ class PlanReturnPath(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="logger", access=common.Access.READ)
         
     def update(self):
-        logger = self.blackboard.get("logger")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
         start_cell = self.blackboard.get("start_cell")
         grid_size = 5
 
@@ -322,8 +377,25 @@ class PlanReturnPath(py_trees.behaviour.Behaviour):
         if current is None:
             current = start_cell
 
-        # Obstacles from blackboard (list of (row,col))
-        obstacles = set(self.blackboard.get("obstacles") or [])
+        # Obstacles from blackboard (list of (row,col)). If not present,
+        # try to derive from a grid_map on the blackboard.
+        obstacles_list = self.blackboard.get("obstacles")
+        if obstacles_list is None:
+            grid_map = self.blackboard.get("grid_map")
+            if grid_map:
+                # derive obstacles from grid_map (1 indicates obstacle)
+                inferred = []
+                for r in range(len(grid_map)):
+                    for c in range(len(grid_map[0])):
+                        if grid_map[r][c] == 1:
+                            inferred.append((r, c))
+                obstacles_list = inferred
+                logger.debug(f"[{self.name}] Inferred obstacles from grid_map: {obstacles_list}")
+            else:
+                obstacles_list = []
+
+        obstacles = set(obstacles_list or [])
+        logger.debug(f"[{self.name}] Planning return from {self.blackboard.get('current_target') or 'UNKNOWN'} to {start_cell}; obstacles={obstacles}")
 
         # BFS from current -> start_cell on a 4-connected grid
         from collections import deque
@@ -399,8 +471,8 @@ class LogMessage(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="logger", access=common.Access.READ)
         
     def update(self):
-        logger = self.blackboard.get("logger")
-        logger.info(f"[BT] {self.message}")
+        logger = get_bt_logger_from_blackboard(self.blackboard)
+        logger.info(f"{self.message}")
         return py_trees.common.Status.SUCCESS
 
 

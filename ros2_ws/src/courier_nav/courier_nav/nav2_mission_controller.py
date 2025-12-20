@@ -462,7 +462,20 @@ class CellToCellController(Node):
         cmd.linear.x = 0.0
         cmd.angular.z = 0.0
         for _ in range(3):
-            self.cmd_vel_pub.publish(cmd)
+            try:
+                # Only publish if rclpy is still running
+                if hasattr(rclpy, 'ok') and rclpy.ok():
+                    self.cmd_vel_pub.publish(cmd)
+                else:
+                    break
+            except Exception as e:
+                # During shutdown the publisher/context may become invalid
+                # Log at debug level and stop trying to publish.
+                try:
+                    self.get_logger().debug(f'stop_robot: publish failed: {e}')
+                except Exception:
+                    pass
+                break
 
     def publish_markers(self):
         """Publish visualization markers."""
