@@ -513,8 +513,9 @@ class CellToCellController(Node):
             self.get_logger().info(f'NEW PATH: {list(self.path_queue)}')
             self.go_to_next_waypoint()
         else:
-            self.get_logger().error(f'NO PATH AVAILABLE to {target}! Mission failed.')
-            self.state = RobotState.MISSION_COMPLETE
+            self.get_logger().warn(f'NO PATH AVAILABLE to {target}! Will keep retrying...')
+            # Optionally, add a delay or backoff here
+            # The control loop should keep calling this method until a path is found
 
     def stop_robot(self):
         """Stop all motion."""
