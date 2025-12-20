@@ -59,6 +59,18 @@ class CellToCellController(Node):
         self.animation_start_time = None
         self.animation_step = 0
         
+        # === Battery Management ===
+        self.battery_level = 90.0  # Start at 90%
+        self.is_charging = False
+        self.last_battery_update = None
+        self.last_battery_display = None
+        self.battery_update_interval = 10.0  # Update every 10 seconds
+        self.battery_display_interval = 10.0  # Display every 10 seconds
+        self.battery_drain_rate = 10.0  # 10% per interval
+        self.battery_charge_rate = 15.0  # 15% per interval when charging
+        self.battery_low_threshold = 20.0
+        self.battery_full_threshold = 90.0
+        
         # === Robot State (in ODOM frame) ===
         # Robot spawns at world (0.5, 0.5) which is odom (0, 0)
         self.robot_x = 0.0
@@ -100,6 +112,7 @@ class CellToCellController(Node):
         self.control_timer = self.create_timer(0.05, self.control_loop)  # 20Hz
         self.marker_timer = self.create_timer(1.0, self.publish_markers)
         self.lidar_check_timer = self.create_timer(2.0, self.check_lidar)  # Check LIDAR
+        self.battery_timer = self.create_timer(1.0, self.battery_management)  # Battery check
         self.startup_timer = self.create_timer(3.0, self.start_mission)
         self.waypoint_timer = None  # One-shot timer for waypoint transitions
         self.animation_timer = self.create_timer(0.5, self.animation_loop)  # Animation updates
@@ -115,6 +128,62 @@ class CellToCellController(Node):
             self.get_logger().warn('NO LIDAR DATA RECEIVED! Check /scan topic')
         else:
             self.get_logger().info(f'LIDAR OK: front_distance = {self.front_distance:.2f}m')
+
+    def battery_management(self):
+        """Monitor and manage battery level with display, consumption, and recharging."""
+        current_time = time.time()
+        
+        # Initialize timestamps on first call
+        if self.last_battery_update is None:
+            self.last_battery_update = current_time
+            self.last_battery_display = current_time
+            return
+        
+        # Update battery level every interval
+        time_since_update = current_time - self.last_battery_update
+        
+        if time_since_update >= self.battery_update_interval:
+            if self.is_charging:
+                # Recharge battery
+                self.battery_level = min(100.0, self.battery_level + self.battery_charge_rate)
+                
+                # Stop charging when battery is sufficiently charged
+                if self.battery_level >= self.battery_full_threshold:
+                    self.is_charging = False
+                    self.get_logger().info(f'🔋 Battery recharged to {self.battery_level:.0f}% - Resuming operations')
+            else:
+                # Drain battery during normal operation (only if not in MISSION_COMPLETE)
+                if self.state != RobotState.MISSION_COMPLETE:
+                    self.battery_level = max(0.0, self.battery_level - self.battery_drain_rate)
+                
+                # Start charging if battery is low
+                if self.battery_level < self.battery_low_threshold:
+                    self.is_charging = True
+                    self.get_logger().warn(f'⚠️  Battery critically low ({self.battery_level:.0f}%) - Starting recharge')
+                    # Stop the robot when charging starts
+                    self.stop_robot()
+            
+            self.last_battery_update = current_time
+        
+        # Display battery status every display interval
+        time_since_display = current_time - self.last_battery_display
+        
+        if time_since_display >= self.battery_display_interval:
+            if self.is_charging:
+                self.get_logger().info(f'🔋 Battery: {self.battery_level:.0f}% (CHARGING...)')
+            else:
+                # Choose emoji based on battery level
+                if self.battery_level >= 80:
+                    emoji = '🔋'
+                elif self.battery_level >= 50:
+                    emoji = '🔋'
+                elif self.battery_level >= 20:
+                    emoji = '⚠️'
+                else:
+                    emoji = '🪫'
+                self.get_logger().info(f'{emoji} Battery: {self.battery_level:.0f}%')
+            
+            self.last_battery_display = current_time
 
     def cell_to_world(self, row, col):
         """Convert grid cell (row, col) to ODOM frame coordinates.
@@ -344,6 +413,11 @@ class CellToCellController(Node):
             return
         
         if self.state == RobotState.MISSION_COMPLETE:
+            return
+        
+        # Stop robot movement if battery is charging
+        if self.is_charging:
+            self.stop_robot()
             return
         
         if self.state == RobotState.REACHED_WAYPOINT:
