@@ -2,15 +2,14 @@
 """
 Cell-to-Cell Navigation Controller - BEHAVIOR TREE ARCHITECTURE
 
-Il robot si muove SOLO in linea retta tra celle adiacenti:
-1. STOP completo
-2. ROTATE in place fino ad allineamento perfetto (0°, 90°, 180°, -90°)
-3. MOVE STRAIGHT senza correzioni angolari
-4. Ripeti per ogni cella
+This is a complete rewrite of the mission controller using py_trees behavior tree.
+All low-level control logic (rotation, movement, LIDAR) remains identical,
+but organized hierarchically instead of as a flat state machine.
 
-NO diagonal movements, NO curved paths.
-
-Architecture: py_trees behavior tree with hierarchical task decomposition.
+Architecture:
+- Root Sequence: Navigate → Collect → Plan Return → Navigate Home → Deliver
+- Each navigation phase repeats: Get Waypoint → Rotate → Move (with obstacle handling)
+- Blackboard shares state between behaviors
 """
 
 import rclpy
@@ -30,11 +29,11 @@ from py_trees import common
 
 
 # ============================================================================
-# BEHAVIOR TREE BEHAVIORS
+# BEHAVIOR TREE LEAF BEHAVIORS
 # ============================================================================
 
 class RotateToTarget(py_trees.behaviour.Behaviour):
-    """Rotate robot to target yaw angle."""
+    """Rotate robot to target yaw angle with strict orthogonal alignment."""
     
     def __init__(self, name: str):
         super().__init__(name)
@@ -80,10 +79,7 @@ class RotateToTarget(py_trees.behaviour.Behaviour):
         # Continue rotating
         cmd = Twist()
         cmd.linear.x = 0.0
-        if angle_error > 0:
-            cmd.angular.z = node.rotation_speed
-        else:
-            cmd.angular.z = -node.rotation_speed
+        cmd.angular.z = node.rotation_speed if angle_error > 0 else -node.rotation_speed
         
         # Slow down when close
         if abs(angle_error) < 0.2:
@@ -94,7 +90,7 @@ class RotateToTarget(py_trees.behaviour.Behaviour):
 
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
-    """Move robot straight to target position."""
+    """Move robot straight to target position (no angular correction during movement)."""
     
     def __init__(self, name: str):
         super().__init__(name)
@@ -117,7 +113,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         if node.front_distance < node.obstacle_threshold:
             node.stop_robot()
             node.get_logger().warn(f'OBSTACLE at {node.front_distance:.2f}m!')
-            return py_trees.common.Status.FAILURE  # Trigger obstacle handling
+            return py_trees.common.Status.FAILURE
         
         # Check boundaries
         if node.robot_x < -0.4 or node.robot_x > 4.4 or node.robot_y < -0.4 or node.robot_y > 4.4:
@@ -130,7 +126,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         dy = target_y - node.robot_y
         distance = math.sqrt(dx*dx + dy*dy)
         
-        # Log less frequently
+        # Log less frequently (every 2s)
         if not hasattr(node, '_last_log') or (node.get_clock().now().nanoseconds - node._last_log) > 2_000_000_000:
             node.get_logger().debug(f'Moving: dist={distance:.2f}m | LIDAR={node.front_distance:.2f}m')
             node._last_log = node.get_clock().now().nanoseconds
@@ -141,14 +137,14 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             node.get_logger().info(f'REACHED Cell{current_target}!')
             return py_trees.common.Status.SUCCESS
         
-        # Check drift
+        # Check drift - if drifted too much, fail to trigger re-rotation
         angle_error = node.normalize_angle(target_yaw - node.robot_yaw)
         if abs(angle_error) > 0.15:  # ~8.5 degrees
             node.get_logger().debug('DRIFT detected - need realignment')
             node.stop_robot()
-            return py_trees.common.Status.FAILURE  # Go back to rotation
+            return py_trees.common.Status.FAILURE
         
-        # Move straight
+        # Move straight - NO angular correction
         cmd = Twist()
         cmd.linear.x = node.linear_speed
         cmd.angular.z = 0.0
@@ -162,7 +158,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
 
 
 class GetNextWaypoint(py_trees.behaviour.Behaviour):
-    """Pop next waypoint from path queue and set target."""
+    """Pop next waypoint from path queue and calculate target angle."""
     
     def __init__(self, name: str):
         super().__init__(name)
@@ -175,7 +171,7 @@ class GetNextWaypoint(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="target_yaw", access=common.Access.WRITE)
         
     def update(self):
-        """Get next waypoint and calculate target angle."""
+        """Get next waypoint and calculate cardinal direction."""
         node = self.blackboard.get("node")
         path_queue = self.blackboard.get("path_queue")
         
@@ -192,7 +188,7 @@ class GetNextWaypoint(py_trees.behaviour.Behaviour):
         self.blackboard.set("target_world_x", target_x)
         self.blackboard.set("target_world_y", target_y)
         
-        # Calculate target yaw (cardinal direction)
+        # Calculate target yaw - use grid delta for precision
         try:
             current_cell = node.world_to_cell(node.robot_x, node.robot_y)
         except Exception:
@@ -211,11 +207,13 @@ class GetNextWaypoint(py_trees.behaviour.Behaviour):
             elif drow != 0:
                 target_yaw = math.pi / 2 if drow > 0 else -math.pi / 2
             else:
+                # Fallback to world coordinates
                 if abs(dx) > abs(dy):
                     target_yaw = 0.0 if dx > 0 else math.pi
                 else:
                     target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
         else:
+            # Fallback if world_to_cell failed
             if abs(dx) > abs(dy):
                 target_yaw = 0.0 if dx > 0 else math.pi
             else:
@@ -411,7 +409,7 @@ class HandleObstacle(py_trees.behaviour.Behaviour):
             time.sleep(0.05)
         node.stop_robot()
         
-        # Mark cell as blocked
+        # Mark cell as blocked (never block start cell)
         if current_target and current_target != node.start_cell:
             node.obstacles.add(current_target)
             node.get_logger().info(f'Marked Cell{current_target} as blocked')
@@ -420,7 +418,7 @@ class HandleObstacle(py_trees.behaviour.Behaviour):
         node.get_logger().info(f'Current position: ({node.robot_x:.2f}, {node.robot_y:.2f}) = Cell{current_cell}')
         node.get_logger().info(f'Obstacles now: {node.obstacles}')
         
-        # Determine target
+        # Determine target based on mission phase
         if returning_home:
             target = node.start_cell
             node.get_logger().info(f'Replanning RETURN path to {target}')
@@ -443,29 +441,27 @@ class HandleObstacle(py_trees.behaviour.Behaviour):
 # ROS2 NODE WITH BEHAVIOR TREE
 # ============================================================================
 
-class CellToCellController(Node):
+class BehaviorTreeController(Node):
+    """ROS2 node that runs a behavior tree for courier robot mission."""
     
     def __init__(self):
-        super().__init__('cell_to_cell_controller')
+        super().__init__('behavior_tree_controller')
         
         # === Grid Configuration ===
         self.cell_size = 1.0
         self.grid_size = 5
-        
-        # Obstacles as (row, col) - row is Y, col is X in world
         self.obstacles = {(1, 1), (1, 2), (3, 1), (3, 3)}
         
-        # Mission: start (0,0) -> goal (4,2) -> back to start
+        # Mission parameters
         self.start_cell = (0, 0)
         self.goal_cell = (4, 2)
         
         # === Robot State (in ODOM frame) ===
-        # Robot spawns at world (0.5, 0.5) which is odom (0, 0)
         self.robot_x = 0.0
         self.robot_y = 0.0
         self.robot_yaw = 0.0
         
-        # === Control Parameters - STRICT ===
+        # === Control Parameters ===
         self.rotation_speed = 0.5
         self.linear_speed = 0.25
         self.angle_tolerance = 0.08      # ~4.5 degrees
@@ -505,16 +501,15 @@ class CellToCellController(Node):
         self.blackboard.set("returning_home", False)
         
         # === Timers ===
-        self.tree_timer = self.create_timer(0.05, self.tick_tree)  # 20Hz tree ticking
+        self.tree_timer = self.create_timer(0.05, self.tick_tree)  # 20Hz
         self.marker_timer = self.create_timer(1.0, self.publish_markers)
         self.lidar_check_timer = self.create_timer(2.0, self.check_lidar)
         self.startup_timer = self.create_timer(3.0, self.start_mission)
         
         self.get_logger().info('='*50)
-        self.get_logger().info('COURIER ROBOT MISSION CONTROLLER (Behavior Tree)')
+        self.get_logger().info('COURIER ROBOT - BEHAVIOR TREE CONTROLLER')
         self.get_logger().info(f'Mission: Start {self.start_cell} -> Pickup {self.goal_cell} -> Return {self.start_cell}')
         self.get_logger().info('='*50)
-
 
     def create_behavior_tree(self):
         """
@@ -523,16 +518,11 @@ class CellToCellController(Node):
         Tree Structure:
         Root (Sequence)
         ├── Navigate To Pickup (Repeat until path empty)
-        │   └── Move To Cell (Selector with obstacle handling)
-        │       ├── Get Next Waypoint
-        │       ├── Navigate Cell (Sequence)
-        │       │   ├── Rotate To Target
-        │       │   └── Move To Target
-        │       └── Handle Obstacle (on failure)
+        │   └── Move To Cell (with obstacle handling)
         ├── Collect Object
         ├── Plan Return Path
         ├── Navigate To Home (Repeat until path empty)
-        │   └── Move To Cell (Selector with obstacle handling)
+        │   └── Move To Cell (with obstacle handling)
         └── Deliver Object
         """
         
@@ -540,16 +530,17 @@ class CellToCellController(Node):
         root = py_trees.composites.Sequence(name="Mission", memory=True)
         
         # === PHASE 1: Navigate to pickup ===
-        navigate_to_pickup = py_trees.decorators.Retry(
+        # Repeat navigation until path is complete
+        nav_to_pickup = py_trees.decorators.Retry(
             name="Navigate To Pickup",
             child=self.create_move_to_cell_subtree(),
-            num_failures=100  # Keep retrying until path complete
+            num_failures=100  # Keep trying with replanning
         )
         
-        # Wrap in SuccessIsFailure to repeat until path is empty
-        repeat_pickup_nav = py_trees.decorators.SuccessIsRunning(
+        # Wrap to keep running until path is empty
+        repeat_pickup = py_trees.decorators.SuccessIsRunning(
             name="Repeat Until Pickup",
-            child=navigate_to_pickup
+            child=nav_to_pickup
         )
         
         # === PHASE 2: Collect object ===
@@ -559,15 +550,15 @@ class CellToCellController(Node):
         plan_return = PlanReturnPath(name="Plan Return Path")
         
         # === PHASE 4: Navigate home ===
-        navigate_to_home = py_trees.decorators.Retry(
+        nav_to_home = py_trees.decorators.Retry(
             name="Navigate To Home",
             child=self.create_move_to_cell_subtree(),
             num_failures=100
         )
         
-        repeat_home_nav = py_trees.decorators.SuccessIsRunning(
+        repeat_home = py_trees.decorators.SuccessIsRunning(
             name="Repeat Until Home",
-            child=navigate_to_home
+            child=nav_to_home
         )
         
         # === PHASE 5: Deliver object ===
@@ -575,10 +566,10 @@ class CellToCellController(Node):
         
         # Assemble tree
         root.add_children([
-            repeat_pickup_nav,
+            repeat_pickup,
             collect,
             plan_return,
-            repeat_home_nav,
+            repeat_home,
             deliver
         ])
         
@@ -588,25 +579,20 @@ class CellToCellController(Node):
         """
         Create subtree for moving to one cell.
         
-        Returns Selector that tries:
-        1. Normal path (get waypoint -> rotate -> move)
-        2. If fails, handle obstacle and retry
+        Logic:
+        - If path is complete (empty): return SUCCESS to exit repeat loop
+        - Else: try navigation, handle obstacles if navigation fails
         """
         
         # Check if path is complete
         path_check = IsPathComplete(name="Path Complete?")
         
-        # If path complete, return success
-        complete_branch = py_trees.decorators.SuccessIsFailure(
-            name="Invert Path Check",
-            child=path_check
-        )
-        
-        # Selector: try normal navigation, fall back to obstacle handling
+        # Selector: try normal navigation OR handle obstacle
         nav_or_handle = py_trees.composites.Selector(name="Nav Or Handle Obstacle", memory=False)
         
-        # Normal navigation sequence
-        nav_sequence = py_trees.composites.Sequence(name="Navigate Cell", memory=False)
+        # Normal navigation sequence: get waypoint → rotate → move
+        # CRITICAL: memory=True so sequence remembers progress during RUNNING states
+        nav_sequence = py_trees.composites.Sequence(name="Navigate Cell", memory=True)
         get_waypoint = GetNextWaypoint(name="Get Next Waypoint")
         rotate = RotateToTarget(name="Rotate To Target")
         move = MoveToTarget(name="Move To Target")
@@ -617,9 +603,11 @@ class CellToCellController(Node):
         
         nav_or_handle.add_children([nav_sequence, handle_obs])
         
-        # Combine: check if done, otherwise navigate
+        # Combine: if path complete return SUCCESS, otherwise navigate
+        # When IsPathComplete returns SUCCESS → Selector returns SUCCESS (exit loop)
+        # When IsPathComplete returns FAILURE → Selector tries nav_or_handle
         move_cell = py_trees.composites.Selector(name="Move One Cell", memory=False)
-        move_cell.add_children([complete_branch, nav_or_handle])
+        move_cell.add_children([path_check, nav_or_handle])
         
         return move_cell
 
@@ -644,23 +632,27 @@ class CellToCellController(Node):
             self.tree = self.create_behavior_tree()
             self.tree.setup_with_descendants()
             
-            self.get_logger().info('Behavior tree created and initialized')
-            self.get_logger().info(py_trees.display.unicode_tree(root=self.tree, show_status=True))
+            self.get_logger().info('✅ Behavior tree created and initialized')
+            self.get_logger().info('\n' + py_trees.display.unicode_tree(root=self.tree, show_status=True))
         else:
             self.get_logger().error('NO PATH FOUND!')
     
     def tick_tree(self):
-        """Tick the behavior tree (replaces control_loop)."""
+        """Tick the behavior tree at 20Hz."""
         if self.tree is None:
             return
         
-        # Tick tree
+        # Tick tree once
         self.tree.tick_once()
         
         # Check if mission complete
         if self.tree.status == py_trees.common.Status.SUCCESS:
-            self.get_logger().info('Behavior tree completed successfully!')
+            self.get_logger().info('✅ Behavior tree completed successfully!')
             self.tree = None  # Stop ticking
+
+    # ========================================================================
+    # UTILITY METHODS (unchanged from state machine version)
+    # ========================================================================
 
     def check_lidar(self):
         """Periodically check if LIDAR is working."""
@@ -690,9 +682,7 @@ class CellToCellController(Node):
         if start == goal:
             return []
         
-        # 4 directions ONLY: (row_delta, col_delta)
         directions = [(1, 0), (-1, 0), (0, -1), (0, 1)]
-        
         queue = deque([(start, [start])])
         visited = {start}
         
@@ -712,7 +702,7 @@ class CellToCellController(Node):
                 new_path = path + [next_cell]
                 
                 if next_cell == goal:
-                    return new_path[1:]
+                    return new_path[1:]  # Exclude start
                 
                 visited.add(next_cell)
                 queue.append((next_cell, new_path))
@@ -782,437 +772,19 @@ class CellToCellController(Node):
                 except Exception:
                     pass
                 break
-            # Check which phase of the mission we're in
-            current_cell = self.world_to_cell(self.robot_x, self.robot_y)
-            
-            # If we're returning home and path is empty, check if we arrived
-            if self.state == RobotState.RETURNING_HOME or self.returning_home:
-                if current_cell == self.start_cell:
-                    self.get_logger().info('='*50)
-                    self.get_logger().info('RETURNED HOME! Delivering object...')
-                    self.get_logger().info('='*50)
-                    self.stop_robot()
-                    self.state = RobotState.DELIVERING_OBJECT
-                    self.animation_start_time = self.get_clock().now()
-                    self.animation_step = 0
-                    return
-                else:
-                    self.get_logger().error(f'Return path empty but not at home! At {current_cell}, home is {self.start_cell}')
-                    self.state = RobotState.MISSION_COMPLETE
-                    return
-            
-            # If we haven't collected the object yet, check if we reached goal
-            if not self.object_collected and current_cell == self.goal_cell:
-                self.get_logger().info('='*50)
-                self.get_logger().info('REACHED GOAL! Collecting object...')
-                self.get_logger().info('='*50)
-                self.stop_robot()
-                self.state = RobotState.COLLECTING_OBJECT
-                self.animation_start_time = self.get_clock().now()
-                self.animation_step = 0
-                return
-            
-            # Otherwise mission complete (or error)
-            self.get_logger().info('='*50)
-            self.get_logger().info('MISSION COMPLETE!')
-            self.get_logger().info('='*50)
-            self.stop_robot()
-            self.state = RobotState.MISSION_COMPLETE
-            return
-        
-        self.current_target = self.path_queue.popleft()
-        row, col = self.current_target
-        self.target_world_x, self.target_world_y = self.cell_to_world(row, col)
-        
-        # Determine EXACT cardinal direction (0°, 90°, 180°, -90°)
-        # Prefer computing direction from discrete cell delta to avoid
-        # small odometry errors causing 'already at target' behaviour.
-        try:
-            current_cell = self.world_to_cell(self.robot_x, self.robot_y)
-        except Exception:
-            current_cell = None
 
-        target_row, target_col = self.current_target
-
-        # Default fallback uses world coordinates
-        dx = self.target_world_x - self.robot_x
-        dy = self.target_world_y - self.robot_y
-
-        # Compute delta in grid space when possible
-        if current_cell is not None:
-            crow, ccol = current_cell
-            drow = target_row - crow
-            dcol = target_col - ccol
-
-            if dcol != 0:
-                # Horizontal move (col -> X)
-                if dcol > 0:
-                    self.target_yaw = 0.0
-                else:
-                    self.target_yaw = math.pi
-            elif drow != 0:
-                # Vertical move (row -> Y)
-                if drow > 0:
-                    self.target_yaw = math.pi / 2
-                else:
-                    self.target_yaw = -math.pi / 2
-            else:
-                # We're in same cell according to odom - fall back to world dx/dy
-                if abs(dx) > abs(dy):
-                    self.target_yaw = 0.0 if dx > 0 else math.pi
-                else:
-                    self.target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
-        else:
-            # Fallback if world_to_cell failed
-            if abs(dx) > abs(dy):
-                self.target_yaw = 0.0 if dx > 0 else math.pi
-            else:
-                self.target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
-        
-        self.get_logger().debug(f'TARGET: Cell{self.current_target} = ({self.target_world_x:.2f}, {self.target_world_y:.2f})')
-        self.get_logger().info(f'ROTATE TO: {math.degrees(self.target_yaw):.0f} deg')
-        
-        self.state = RobotState.ROTATING
-        self.rotation_start_time = self.get_clock().now()
-
-    def odom_callback(self, msg):
-        """Update robot pose from odometry."""
-        self.robot_x = msg.pose.pose.position.x
-        self.robot_y = msg.pose.pose.position.y
-        
-        # Extract yaw from quaternion
-        q = msg.pose.pose.orientation
-        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
-
-    def normalize_angle(self, angle):
-        """Normalize angle to [-pi, pi]."""
-        while angle > math.pi:
-            angle -= 2 * math.pi
-        while angle < -math.pi:
-            angle += 2 * math.pi
-        return angle
-
-    def scan_callback(self, msg):
-        """Process LIDAR for obstacle detection."""
-        if len(msg.ranges) == 0:
-            return
-        
-        self.lidar_received = True
-        num_readings = len(msg.ranges)
-        angle_increment = msg.angle_increment
-        angle_min = msg.angle_min
-        
-        # Front sector: -30° to +30°
-        start_idx = int((-0.52 - angle_min) / angle_increment)
-        end_idx = int((0.52 - angle_min) / angle_increment)
-        
-        start_idx = max(0, min(start_idx, num_readings - 1))
-        end_idx = max(0, min(end_idx, num_readings - 1))
-        
-        valid_ranges = []
-        for i in range(start_idx, end_idx + 1):
-            r = msg.ranges[i]
-            if msg.range_min < r < msg.range_max:
-                valid_ranges.append(r)
-        
-        if valid_ranges:
-            self.front_distance = min(valid_ranges)
-        else:
-            self.front_distance = float('inf')
-
-    def control_loop(self):
-        """Main control state machine - STRICT orthogonal movement."""
-        if self.state == RobotState.WAITING_START:
-            return
-        
-        if self.state == RobotState.MISSION_COMPLETE:
-            return
-        
-        if self.state == RobotState.REACHED_WAYPOINT:
-            return
-        
-        if self.state == RobotState.COLLECTING_OBJECT:
-            return
-        
-        if self.state == RobotState.PLANNING_RETURN:
-            return
-        
-        if self.state == RobotState.DELIVERING_OBJECT:
-            return
-        
-        # If an obstacle is detected we should prevent forward motion,
-        # but rotation in place must be allowed so the robot can turn
-        # into the next corridor/cell. Only trigger emergency handling
-        # when not currently rotating in place.
-        if self.front_distance < self.obstacle_threshold and self.state != RobotState.ROTATING:
-            self.stop_robot()
-            self.get_logger().warn(f'EMERGENCY STOP! Obstacle at {self.front_distance:.2f}m')
-            self.handle_obstacle()
-            return
-        
-        # BOUNDARY CHECK: Don't go outside grid (odometry frame: -0.5 to 4.5)
-        # Robot spawns at world (0.5, 0.5) which is odom (0, 0)
-        # Grid is 5x5, so valid range in odom frame is approximately -0.4 to 4.4
-        if self.robot_x < -0.4 or self.robot_x > 4.4 or self.robot_y < -0.4 or self.robot_y > 4.4:
-            self.stop_robot()
-            self.get_logger().warn(f'BOUNDARY! Robot at ({self.robot_x:.2f}, {self.robot_y:.2f}) - backing up')
-            self.handle_obstacle()
-            return
-        
-        cmd = Twist()
-        
-        # === STATE: ROTATING ===
-        if self.state == RobotState.ROTATING:
-            angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
-            
-            # Calculate time spent rotating
-            rotation_elapsed = 0.0
-            if self.rotation_start_time is not None:
-                rotation_elapsed = (self.get_clock().now() - self.rotation_start_time).nanoseconds / 1e9
-            
-            self.get_logger().debug(f'ROTATING: target={math.degrees(self.target_yaw):.1f}° current={math.degrees(self.robot_yaw):.1f}° error={math.degrees(angle_error):.1f}° time={rotation_elapsed:.2f}s')
-            
-            # Only complete rotation after minimum time (0.2s) AND angle is correct
-            # This prevents false "done" when angle hasn't been updated yet
-            min_rotation_time = 0.2
-            if abs(angle_error) < self.angle_tolerance and rotation_elapsed > min_rotation_time:
-                # Rotation complete - FULL STOP before moving
-                self.stop_robot()
-                self.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(self.robot_yaw):.1f}°')
-                
-                # CHECK LIDAR BEFORE MOVING!
-                if self.front_distance < self.obstacle_threshold:
-                    self.get_logger().warn(f'BLOCKED AHEAD! Distance={self.front_distance:.2f}m - Finding new path')
-                    self.handle_obstacle()
-                    return
-                
-                self.state = RobotState.MOVING
-                self.get_logger().info('>>> STATE: MOVING')
-                return
-            
-            # Rotate in place - NO linear velocity!
-            cmd.linear.x = 0.0
-            if angle_error > 0:
-                cmd.angular.z = self.rotation_speed
-            else:
-                cmd.angular.z = -self.rotation_speed
-            
-            # Slow down when close to target angle
-            if abs(angle_error) < 0.2:
-                cmd.angular.z *= 0.5
-        
-        # === STATE: MOVING ===
-        elif self.state == RobotState.MOVING:
-            # CHECK OBSTACLE CONTINUOUSLY!
-            if self.front_distance < self.obstacle_threshold:
-                self.stop_robot()
-                self.get_logger().warn(f'OBSTACLE at {self.front_distance:.2f}m! Stopping and recalculating...')
-                self.handle_obstacle()
-                return
-            
-            dx = self.target_world_x - self.robot_x
-            dy = self.target_world_y - self.robot_y
-            distance = math.sqrt(dx*dx + dy*dy)
-            
-            # Log less frequently to reduce console spam (every 2s)
-            if not hasattr(self, '_last_log') or (self.get_clock().now().nanoseconds - self._last_log) > 2_000_000_000:
-                self.get_logger().debug(f'Moving: dist={distance:.2f}m | LIDAR={self.front_distance:.2f}m')
-                self._last_log = self.get_clock().now().nanoseconds
-            
-            if distance < self.position_tolerance:
-                # Waypoint reached - FULL STOP
-                self.stop_robot()
-                self.get_logger().info(f'REACHED Cell{self.current_target}!')
-                self.state = RobotState.REACHED_WAYPOINT
-                # Go to next waypoint after short delay (cancel any existing timer first)
-                if self.waypoint_timer is not None:
-                    self.waypoint_timer.cancel()
-                self.waypoint_timer = self.create_timer(0.3, self.waypoint_reached_callback)
-                return
-            
-            # Check if we've drifted off course
-            angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
-            if abs(angle_error) > 0.15:  # ~8.5 degrees
-                # Re-align!
-                self.get_logger().debug('DRIFT detected - re-aligning')
-                self.stop_robot()
-                self.state = RobotState.ROTATING
-                return
-            
-            # Move STRAIGHT - NO angular correction!
-            cmd.linear.x = self.linear_speed
-            cmd.angular.z = 0.0
-            
-            # Slow down when approaching target
-            if distance < 0.25:
-                cmd.linear.x *= 0.7
-        
-        self.cmd_vel_pub.publish(cmd)
-
-    def waypoint_reached_callback(self):
-        """Called after reaching a waypoint - one-shot timer callback."""
-        # Cancel timer to make it one-shot
-        if self.waypoint_timer is not None:
-            self.waypoint_timer.cancel()
-            self.waypoint_timer = None
-        
-        if self.state == RobotState.REACHED_WAYPOINT:
-            self.go_to_next_waypoint()
-
-    def handle_obstacle(self):
-        """Handle obstacle - back up, mark cell as blocked and recalculate path."""
-        self.stop_robot()
-        # Back up a little
-        self.get_logger().info('Backing up...')
-        cmd = Twist()
-        cmd.linear.x = -0.15
-        import time
-        for _ in range(15):
-            self.cmd_vel_pub.publish(cmd)
-            time.sleep(0.05)
-        self.stop_robot()
-
-        # Only mark the cell we tried to move into as blocked, never the start cell or all border cells
-        if self.current_target and self.current_target != self.start_cell:
-            self.obstacles.add(self.current_target)
-            self.get_logger().info(f'Marked Cell{self.current_target} as blocked')
-
-        current_cell = self.world_to_cell(self.robot_x, self.robot_y)
-        self.get_logger().info(f'Current position: ({self.robot_x:.2f}, {self.robot_y:.2f}) = Cell{current_cell}')
-        self.get_logger().info(f'Obstacles now: {self.obstacles}')
-
-        # Determine target based on current mission phase
-        if self.returning_home or self.state == RobotState.RETURNING_HOME:
-            target = self.start_cell
-            self.get_logger().info(f'Replanning RETURN path to {target}')
-        else:
-            target = self.goal_cell
-            self.get_logger().info(f'Replanning path to goal {target}')
-
-        new_path = self.bfs_path(current_cell, target)
-        if new_path:
-            self.path_queue = deque(new_path)
-            self.get_logger().info(f'NEW PATH: {list(self.path_queue)}')
-            self.go_to_next_waypoint()
-        else:
-            self.get_logger().warn(f'NO PATH AVAILABLE to {target}! Will keep retrying...')
-            # Optionally, add a delay or backoff here
-            # The control loop should keep calling this method until a path is found
-
-    def stop_robot(self):
-        """Stop all motion."""
-        cmd = Twist()
-        cmd.linear.x = 0.0
-        cmd.angular.z = 0.0
-        for _ in range(3):
-            try:
-                # Only publish if rclpy is still running
-                if hasattr(rclpy, 'ok') and rclpy.ok():
-                    self.cmd_vel_pub.publish(cmd)
-                else:
-                    break
-            except Exception as e:
-                # During shutdown the publisher/context may become invalid
-                # Log at debug level and stop trying to publish.
-                try:
-                    self.get_logger().debug(f'stop_robot: publish failed: {e}')
-                except Exception:
-                    pass
-                break
-
-    def animation_loop(self):
-        """Non-blocking animation loop for gripper actions."""
-        if self.state == RobotState.COLLECTING_OBJECT:
-            if self.animation_start_time is None:
-                return
-            
-            elapsed = (self.get_clock().now() - self.animation_start_time).nanoseconds / 1e9
-            
-            # 4-step animation: 1s each step
-            if elapsed < 1.0 and self.animation_step == 0:
-                self.get_logger().info('🤖 Activating gripper...')
-                self.get_logger().info('   Opening gripper...')
-                self.animation_step = 1
-            elif 1.0 <= elapsed < 2.0 and self.animation_step == 1:
-                self.get_logger().info('   Lowering arm...')
-                self.animation_step = 2
-            elif 2.0 <= elapsed < 3.0 and self.animation_step == 2:
-                self.get_logger().info('   Closing gripper...')
-                self.animation_step = 3
-            elif 3.0 <= elapsed < 4.0 and self.animation_step == 3:
-                self.get_logger().info('   Lifting arm...')
-                self.animation_step = 4
-            elif elapsed >= 4.0 and self.animation_step == 4:
-                self.get_logger().info('✅ Object collected!')
-                self.object_collected = True
-                self.animation_start_time = None
-                self.animation_step = 0
-                self.state = RobotState.PLANNING_RETURN
-                # Plan return path immediately
-                self.plan_return_path()
-                
-        elif self.state == RobotState.DELIVERING_OBJECT:
-            if self.animation_start_time is None:
-                return
-            
-            elapsed = (self.get_clock().now() - self.animation_start_time).nanoseconds / 1e9
-            
-            # 4-step animation: 1s each step
-            if elapsed < 1.0 and self.animation_step == 0:
-                self.get_logger().info('📦 Delivering object...')
-                self.get_logger().info('   Lowering arm...')
-                self.animation_step = 1
-            elif 1.0 <= elapsed < 2.0 and self.animation_step == 1:
-                self.get_logger().info('   Opening gripper...')
-                self.animation_step = 2
-            elif 2.0 <= elapsed < 3.0 and self.animation_step == 2:
-                self.get_logger().info('   Releasing object...')
-                self.animation_step = 3
-            elif 3.0 <= elapsed < 4.0 and self.animation_step == 3:
-                self.get_logger().info('   Raising arm...')
-                self.animation_step = 4
-            elif elapsed >= 4.0 and self.animation_step == 4:
-                self.get_logger().info('✅ Object delivered!')
-                self.get_logger().info('='*50)
-                self.get_logger().info('🎉 MISSION COMPLETE!')
-                self.get_logger().info('='*50)
-                self.animation_start_time = None
-                self.animation_step = 0
-                self.state = RobotState.MISSION_COMPLETE
-    
-    def plan_return_path(self):
-        """Plan path back to starting cell."""
-        self.get_logger().info('='*50)
-        self.get_logger().info('PLANNING RETURN PATH TO HOME')
-        self.get_logger().info('='*50)
-        
-        current_cell = self.world_to_cell(self.robot_x, self.robot_y)
-        self.get_logger().info(f'Current: {current_cell} -> Home: {self.start_cell}')
-        
-        # Calculate BFS path back to start
-        path = self.bfs_path(current_cell, self.start_cell)
-        
-        if path:
-            self.path_queue = deque(path)
-            self.returning_home = True
-            self.get_logger().info(f'RETURN PATH FOUND with {len(path)} waypoints')
-            for i, cell in enumerate(path):
-                wx, wy = self.cell_to_world(cell[0], cell[1])
-                self.get_logger().info(f'  {i+1}. Cell{cell} -> ({wx:.2f}, {wy:.2f})')
-            self.state = RobotState.RETURNING_HOME
-            self.go_to_next_waypoint()
-        else:
-            self.get_logger().error('NO RETURN PATH FOUND!')
-            self.state = RobotState.MISSION_COMPLETE
-    
     def publish_markers(self):
-        """Publish visualization markers."""
+        """Publish visualization markers for current target and path."""
         marker_array = MarkerArray()
         
+        # Get current target from blackboard
+        try:
+            current_target = self.blackboard.get("current_target")
+        except:
+            current_target = None
+        
         # Current target marker
-        if self.current_target:
+        if current_target:
             marker = Marker()
             marker.header.frame_id = 'odom'
             marker.header.stamp = self.get_clock().now().to_msg()
@@ -1221,7 +793,7 @@ class CellToCellController(Node):
             marker.type = Marker.CYLINDER
             marker.action = Marker.ADD
             
-            wx, wy = self.cell_to_world(self.current_target[0], self.current_target[1])
+            wx, wy = self.cell_to_world(current_target[0], current_target[1])
             marker.pose.position.x = wx
             marker.pose.position.y = wy
             marker.pose.position.z = 0.1
@@ -1239,38 +811,46 @@ class CellToCellController(Node):
             marker_array.markers.append(marker)
         
         # Path markers
-        for i, cell in enumerate(self.path_queue):
-            marker = Marker()
-            marker.header.frame_id = 'odom'
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = 'path'
-            marker.id = i + 1
-            marker.type = Marker.SPHERE
-            marker.action = Marker.ADD
-            
-            wx, wy = self.cell_to_world(cell[0], cell[1])
-            marker.pose.position.x = wx
-            marker.pose.position.y = wy
-            marker.pose.position.z = 0.15
-            marker.pose.orientation.w = 1.0
-            
-            marker.scale.x = 0.15
-            marker.scale.y = 0.15
-            marker.scale.z = 0.15
-            
-            marker.color.r = 1.0
-            marker.color.g = 1.0
-            marker.color.b = 0.0
-            marker.color.a = 0.8
-            
-            marker_array.markers.append(marker)
+        try:
+            path_queue = self.blackboard.get("path_queue")
+            for i, cell in enumerate(path_queue):
+                marker = Marker()
+                marker.header.frame_id = 'odom'
+                marker.header.stamp = self.get_clock().now().to_msg()
+                marker.ns = 'path'
+                marker.id = i + 1
+                marker.type = Marker.SPHERE
+                marker.action = Marker.ADD
+                
+                wx, wy = self.cell_to_world(cell[0], cell[1])
+                marker.pose.position.x = wx
+                marker.pose.position.y = wy
+                marker.pose.position.z = 0.15
+                marker.pose.orientation.w = 1.0
+                
+                marker.scale.x = 0.15
+                marker.scale.y = 0.15
+                marker.scale.z = 0.15
+                
+                marker.color.r = 1.0
+                marker.color.g = 1.0
+                marker.color.b = 0.0
+                marker.color.a = 0.8
+                
+                marker_array.markers.append(marker)
+        except:
+            pass
         
         self.marker_pub.publish(marker_array)
 
 
+# ============================================================================
+# MAIN
+# ============================================================================
+
 def main(args=None):
     rclpy.init(args=args)
-    node = CellToCellController()
+    node = BehaviorTreeController()
     
     try:
         rclpy.spin(node)

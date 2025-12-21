@@ -122,17 +122,27 @@ ros2 run courier_nav apriltag_localizer --ros-args -p use_sim_time:=true &
 APRILTAG_PID=$!
 sleep 2
 
-# 7. Avvia il mission controller Nav2
-echo "7️⃣  Avvio Nav2 Mission Controller..."
-ros2 run courier_nav nav2_mission_controller --ros-args -p use_sim_time:=true &
+# 7. Avvia il mission controller (scegli versione)
+echo "7️⃣  Avvio Mission Controller..."
+echo ""
+echo "   📌 Versione disponibile:"
+echo "   • nav2_mission_controller     = State Machine (originale)"
+echo "   • nav2_mission_controller_bt  = Behavior Tree (nuovo)"
+echo ""
+echo "   ▶️  Avvio versione: Behavior Tree"
+ros2 run courier_nav nav2_mission_controller_bt --ros-args -p use_sim_time:=true &
 MISSION_PID=$!
 
 echo ""
-echo "=== 🚀 Sistema Nav2 con AprilTag avviato! ==="
+echo "=== 🚀 Sistema avviato con Behavior Tree Controller! ==="
 echo ""
+echo "🌲 Architettura: Hierarchical Behavior Tree"
 echo "📍 Il robot parte dalla cella (0,0) - coordinate (0.5, 0.5)"
 echo "🎯 Destinazione: cella (4,2) - coordinate (4.5, 2.5)"
 echo "🔄 Poi ritorna alla partenza"
+echo ""
+echo "💡 Per usare la versione State Machine, modifica lo script:"
+echo "   nav2_mission_controller_bt → nav2_mission_controller"
 echo ""
 echo "📊 Per monitorare Nav2:"
 echo "   ros2 topic echo /navigate_to_pose/_action/status"

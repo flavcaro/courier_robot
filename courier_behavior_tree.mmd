@@ -1,5 +1,5 @@
-%% Courier Robot Behavior Tree
-%% Generated from courier_behavior_tree.py
+%% Courier Robot Behavior Tree - ACTUAL IMPLEMENTATION
+%% Generated from nav2_mission_controller_bt.py
 %% 
 %% Node Types:
 %% - Selector: ? (try children in order until one succeeds)
@@ -9,68 +9,75 @@
 %% - Action: ▢ (do something)
 
 flowchart TD
-    Root["Root<br/>?(Selector)"]
+    Root["Mission Root<br/>→(Sequence)"]
     
-    %% Left branch - Mission Complete Check
-    MissionDone["Mission Done?<br/>◇(Condition)"]
+    %% Phase 1: Navigate To Pickup
+    RepeatPickup["Repeat Until Pickup<br/>↻(SuccessIsRunning)"]
+    NavPickupRetry["Navigate To Pickup<br/>↻(Retry: 100x)"]
+    MoveCell1["Move One Cell<br/>?(Selector)"]
+    PathCheck1["Invert Path Check<br/>↻(SuccessIsFailure)"]
+    IsComplete1["Path Complete?<br/>◇(Condition)"]
+    NavOrHandle1["Nav Or Handle Obstacle<br/>?(Selector)"]
+    NavSeq1["Navigate Cell<br/>→(Sequence)"]
+    GetWaypoint1["Get Next Waypoint<br/>▢(Action)"]
+    Rotate1["Rotate To Target<br/>▢(Action)"]
+    Move1["Move To Target<br/>▢(Action)"]
+    HandleObs1["Handle Obstacle<br/>▢(Backup & Replan)"]
     
-    %% Right branch - Main Mission
-    MainMission["Main Mission<br/>→(Sequence)"]
+    %% Phase 2: Collect
+    CollectObject["Collect Object<br/>▢(4s gripper animation)"]
     
-    %% Battery Check
-    BatteryCheck["Check Battery<br/>◇(min_level: 10%)"]
+    %% Phase 3: Plan Return
+    PlanReturn["Plan Return Path<br/>▢(BFS pathfinding)"]
     
-    %% Go To Pickup
-    GoToPickup["Go To Pickup<br/>?(Selector)"]
-    AlreadyAtPickup["Already Collected?<br/>◇(Condition)"]
-    RepeatPickupNav["Repeat Pickup Nav<br/>↻(Repeat: -1)"]
-    NavToPickup["Navigate To Pickup<br/>→(Sequence)"]
-    GetWaypointPickup["Get Pickup Waypoint<br/>▢(Action)"]
-    Nav2ToPickup["Nav2 To Pickup<br/>▢(Navigate with Nav2)"]
+    %% Phase 4: Navigate Home
+    RepeatHome["Repeat Until Home<br/>↻(SuccessIsRunning)"]
+    NavHomeRetry["Navigate To Home<br/>↻(Retry: 100x)"]
+    MoveCell2["Move One Cell<br/>?(Selector)"]
+    PathCheck2["Invert Path Check<br/>↻(SuccessIsFailure)"]
+    IsComplete2["Path Complete?<br/>◇(Condition)"]
+    NavOrHandle2["Nav Or Handle Obstacle<br/>?(Selector)"]
+    NavSeq2["Navigate Cell<br/>→(Sequence)"]
+    GetWaypoint2["Get Next Waypoint<br/>▢(Action)"]
+    Rotate2["Rotate To Target<br/>▢(Action)"]
+    Move2["Move To Target<br/>▢(Action)"]
+    HandleObs2["Handle Obstacle<br/>▢(Backup & Replan)"]
     
-    %% Collect Object
-    CollectSelector["Collect Selector<br/>?(Selector)"]
-    AlreadyCollected["Object Collected?<br/>◇(Condition)"]
-    CollectObject["Collect Object<br/>▢(4s animation)"]
+    %% Phase 5: Deliver
+    Deliver["Deliver Object<br/>▢(4s gripper animation)"]
     
-    %% Plan Return
-    PlanReturn["Plan Return<br/>?(Selector)"]
-    ReturnPlanned["Return Planned?<br/>◇(Condition)"]
-    PlanReturnPath["Plan Return Path<br/>▢(BFS pathfinding)"]
+    %% Main sequence connections
+    Root --> RepeatPickup
+    Root --> CollectObject
+    Root --> PlanReturn
+    Root --> RepeatHome
+    Root --> Deliver
     
-    %% Navigate Home
-    NavHome["Navigate Home<br/>→(Sequence)"]
-    GetWaypointHome["Get Home Waypoint<br/>▢(Action)"]
-    Nav2ToHome["Nav2 To Home<br/>▢(Navigate with Nav2)"]
+    %% Navigate to Pickup structure
+    RepeatPickup --> NavPickupRetry
+    NavPickupRetry --> MoveCell1
+    MoveCell1 --> PathCheck1
+    MoveCell1 --> NavOrHandle1
+    PathCheck1 --> IsComplete1
+    NavOrHandle1 --> NavSeq1
+    NavOrHandle1 --> HandleObs1
+    NavSeq1 --> GetWaypoint1
+    NavSeq1 --> Rotate1
+    NavSeq1 --> Move1
     
-    %% Deliver Object
-    Deliver["Deliver Object<br/>▢(4s animation)"]
-    
-    %% Connections
-    Root --> MissionDone
-    Root --> MainMission
-    
-    MainMission --> BatteryCheck
-    MainMission --> GoToPickup
-    MainMission --> CollectSelector
-    MainMission --> PlanReturn
-    MainMission --> NavHome
-    MainMission --> Deliver
-    
-    GoToPickup --> AlreadyAtPickup
-    GoToPickup --> RepeatPickupNav
-    RepeatPickupNav --> NavToPickup
-    NavToPickup --> GetWaypointPickup
-    NavToPickup --> Nav2ToPickup
-    
-    CollectSelector --> AlreadyCollected
-    CollectSelector --> CollectObject
-    
-    PlanReturn --> ReturnPlanned
-    PlanReturn --> PlanReturnPath
-    
-    NavHome --> GetWaypointHome
-    NavHome --> Nav2ToHome
+    %% Navigate to Home structure
+    RepeatHome --> NavHomeRetry
+    NavHomeRetry --> MoveCell2
+    MoveCell2 --> PathCheck2
+    MoveCell2 --> NavOrHandle2
+    PathCheck2 --> IsComplete2
+    NavOrHandle2 --> NavSeq2
+    NavOrHandle2 --> HandleObs2
+    NavSeq2 --> GetWaypoint2
+    NavSeq2 --> Rotate2
+    NavSeq2 --> Move2
+    NavSeq2 --> Rotate2
+    NavSeq2 --> Move2
     
     %% Styling
     classDef selector fill:#FF9999,stroke:#CC0000,stroke-width:3px,color:#000
@@ -79,8 +86,8 @@ flowchart TD
     classDef condition fill:#99DD99,stroke:#228B22,stroke-width:2px,color:#000
     classDef action fill:#CC99FF,stroke:#6600CC,stroke-width:2px,color:#000
     
-    class Root,GoToPickup,CollectSelector,PlanReturn selector
-    class MainMission,NavToPickup,NavHome sequence
-    class RepeatPickupNav decorator
-    class MissionDone,AlreadyAtPickup,BatteryCheck,AlreadyCollected,ReturnPlanned condition
-    class GetWaypointPickup,Nav2ToPickup,CollectObject,PlanReturnPath,GetWaypointHome,Nav2ToHome,Deliver action
+    class MoveCell1,MoveCell2,NavOrHandle1,NavOrHandle2 selector
+    class Root,NavSeq1,NavSeq2 sequence
+    class RepeatPickup,RepeatHome,NavPickupRetry,NavHomeRetry,PathCheck1,PathCheck2 decorator
+    class IsComplete1,IsComplete2 condition
+    class GetWaypoint1,Rotate1,Move1,HandleObs1,CollectObject,PlanReturn,GetWaypoint2,Rotate2,Move2,HandleObs2,Deliver action

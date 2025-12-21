@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'nav2_mission_controller = courier_nav.nav2_mission_controller:main',
+            'nav2_mission_controller_bt = courier_nav.nav2_mission_controller_bt:main',
             'spawner = courier_nav.world_spawner:main',
             'apriltag_localizer = courier_nav.apriltag_localizer:main',
         ],
