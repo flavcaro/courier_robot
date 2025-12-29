@@ -77,8 +77,8 @@ def generate_launch_description():
         actions=[
             Node(
                 package='courier_nav',
-                executable='courier_controller',
-                name='courier_controller',
+                executable='nav2_mission_controller_bt',
+                name='behavior_tree_controller',
                 output='screen',
                 parameters=[{'use_sim_time': True}]
             )

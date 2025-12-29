@@ -517,12 +517,10 @@ class BehaviorTreeController(Node):
         
         Tree Structure:
         Root (Sequence)
-        ├── Navigate To Pickup (Repeat until path empty)
-        │   └── Move To Cell (with obstacle handling)
+        ├── Navigate To Pickup (Loop until complete)
         ├── Collect Object
         ├── Plan Return Path
-        ├── Navigate To Home (Repeat until path empty)
-        │   └── Move To Cell (with obstacle handling)
+        ├── Navigate To Home (Loop until complete)
         └── Deliver Object
         """
         
@@ -530,17 +528,20 @@ class BehaviorTreeController(Node):
         root = py_trees.composites.Sequence(name="Mission", memory=True)
         
         # === PHASE 1: Navigate to pickup ===
-        # Repeat navigation until path is complete
-        nav_to_pickup = py_trees.decorators.Retry(
-            name="Navigate To Pickup",
-            child=self.create_move_to_cell_subtree(),
-            num_failures=100  # Keep trying with replanning
-        )
-        
-        # Wrap to keep running until path is empty
-        repeat_pickup = py_trees.decorators.SuccessIsRunning(
-            name="Repeat Until Pickup",
-            child=nav_to_pickup
+        # UntilSuccess: keeps looping until child returns SUCCESS
+        # When path empties, NavigateOneCell returns FAILURE, triggers next iteration
+        # We wrap in a custom pattern: loop while path has waypoints
+        nav_to_pickup = py_trees.decorators.FailureIsSuccess(
+            name="Nav To Pickup Complete",
+            child=py_trees.decorators.Repeat(
+                name="Navigate Pickup Loop",
+                child=py_trees.decorators.Retry(
+                    name="Try Cell",
+                    child=self.create_navigate_one_cell(),
+                    num_failures=5
+                ),
+                num_success=999
+            )
         )
         
         # === PHASE 2: Collect object ===
@@ -550,15 +551,17 @@ class BehaviorTreeController(Node):
         plan_return = PlanReturnPath(name="Plan Return Path")
         
         # === PHASE 4: Navigate home ===
-        nav_to_home = py_trees.decorators.Retry(
-            name="Navigate To Home",
-            child=self.create_move_to_cell_subtree(),
-            num_failures=100
-        )
-        
-        repeat_home = py_trees.decorators.SuccessIsRunning(
-            name="Repeat Until Home",
-            child=nav_to_home
+        nav_to_home = py_trees.decorators.FailureIsSuccess(
+            name="Nav To Home Complete",
+            child=py_trees.decorators.Repeat(
+                name="Navigate Home Loop",
+                child=py_trees.decorators.Retry(
+                    name="Try Cell",
+                    child=self.create_navigate_one_cell(),
+                    num_failures=5
+                ),
+                num_success=999
+            )
         )
         
         # === PHASE 5: Deliver object ===
@@ -566,50 +569,36 @@ class BehaviorTreeController(Node):
         
         # Assemble tree
         root.add_children([
-            repeat_pickup,
+            nav_to_pickup,
             collect,
             plan_return,
-            repeat_home,
+            nav_to_home,
             deliver
         ])
         
         return root
     
-    def create_move_to_cell_subtree(self):
+    def create_navigate_one_cell(self):
         """
-        Create subtree for moving to one cell.
-        
-        Logic:
-        - If path is complete (empty): return SUCCESS to exit repeat loop
-        - Else: try navigation, handle obstacles if navigation fails
+        Navigate to one cell: get waypoint → rotate → move.
+        Returns FAILURE when path is empty (to exit repeat loop).
+        Returns SUCCESS when cell reached.
+        Returns FAILURE on obstacle (retry will replan).
         """
+        # Sequence with memory: get waypoint → rotate → move
+        nav_sequence = py_trees.composites.Sequence(name="Navigate One Cell", memory=True)
         
-        # Check if path is complete
-        path_check = IsPathComplete(name="Path Complete?")
-        
-        # Selector: try normal navigation OR handle obstacle
-        nav_or_handle = py_trees.composites.Selector(name="Nav Or Handle Obstacle", memory=False)
-        
-        # Normal navigation sequence: get waypoint → rotate → move
-        # CRITICAL: memory=True so sequence remembers progress during RUNNING states
-        nav_sequence = py_trees.composites.Sequence(name="Navigate Cell", memory=True)
         get_waypoint = GetNextWaypoint(name="Get Next Waypoint")
-        rotate = RotateToTarget(name="Rotate To Target")
+        rotate = RotateToTarget(name="Rotate To Target")  
         move = MoveToTarget(name="Move To Target")
-        nav_sequence.add_children([get_waypoint, rotate, move])
         
-        # Obstacle handling (runs if navigation fails)
-        handle_obs = HandleObstacle(name="Handle Obstacle")
+        # Add obstacle handling as a fallback
+        move_with_fallback = py_trees.composites.Selector(name="Move Or Handle", memory=False)
+        move_with_fallback.add_children([move, HandleObstacle(name="Handle Obstacle")])
         
-        nav_or_handle.add_children([nav_sequence, handle_obs])
+        nav_sequence.add_children([get_waypoint, rotate, move_with_fallback])
         
-        # Combine: if path complete return SUCCESS, otherwise navigate
-        # When IsPathComplete returns SUCCESS → Selector returns SUCCESS (exit loop)
-        # When IsPathComplete returns FAILURE → Selector tries nav_or_handle
-        move_cell = py_trees.composites.Selector(name="Move One Cell", memory=False)
-        move_cell.add_children([path_check, nav_or_handle])
-        
-        return move_cell
+        return nav_sequence
 
     def start_mission(self):
         """Calculate initial path and start behavior tree."""
