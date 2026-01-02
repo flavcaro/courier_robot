@@ -188,16 +188,7 @@ class AprilTagLocalizer(Node):
         # Detect AprilTags
         detections = self.detect_tags(gray)
         
-        # Log detection status periodically
-        now = self.get_clock().now().nanoseconds / 1e9
-        if (now - self._last_detection_log) > self._detection_log_interval:
-            if detections:
-                tag_ids = [d['id'] for d in detections]
-                self.get_logger().info(f'Detected {len(detections)} tag(s): {tag_ids}')
-            else:
-                self.get_logger().info('No tags detected in current frame')
-            self._last_detection_log = now
-        
+        # Process detections silently (no periodic logging)
         if detections:
             self.process_detections(detections, cv_image, msg.header.stamp)
             
@@ -311,65 +302,75 @@ class AprilTagLocalizer(Node):
             robot_pose = self.compute_robot_pose(tag_world, pose_t, pose_R)
             
             if robot_pose is not None:
-                # Throttled info-level logging to keep console readable
-                now = self.get_clock().now().nanoseconds / 1e9
-                self.detection_count += 1
-                if (now - self._last_detection_log) >= self._detection_log_interval or (self.detection_count % 10 == 0):
-                    self.get_logger().info(
-                        f'Detected Tag {tag_id} dist={distance:.2f}m -> '
-                        f'robot_est=({robot_pose[0]:.2f},{robot_pose[1]:.2f},{math.degrees(robot_pose[2]):.1f}deg)'
-                    )
-                    self._last_detection_log = now
+                # Silently publish pose corrections (no logging)
                 self.publish_pose(robot_pose, tag_id, distance, stamp)
     
     def compute_robot_pose(self, tag_world, pose_t, pose_R):
         """
-        Compute robot world pose from tag detection.
+        Compute robot world pose from tag detection using proper transformation chain.
+        
+        Transformation chain:
+        1. T_world_tag: Known tag pose in world (from tag_positions)
+        2. T_camera_tag: Detected camera-to-tag transform (from solvePnP)
+        3. T_base_camera: Fixed camera mount on robot base
+        4. T_world_base = T_world_tag × T_tag_camera × T_camera_base
         
         Args:
             tag_world: Dict with tag's world position (x, y, z, yaw)
-            pose_t: Translation from camera to tag
-            pose_R: Rotation from camera to tag
+            pose_t: Translation from camera to tag (3x1)
+            pose_R: Rotation from camera to tag (3x3)
         
         Returns:
-            Tuple (x, y, yaw) of robot in world frame
+            Tuple (x, y, yaw) of robot base in world frame
         """
-        # Camera-to-tag translation
-        tx, ty, tz = pose_t.flatten()
-        
-        # Distance from camera to tag
-        distance = np.sqrt(tx**2 + ty**2 + tz**2)
-        
-        # Angle to tag in camera frame (horizontal)
-        angle_to_tag = np.arctan2(tx, tz)
-        
-        # Tag's world position and orientation
+        # === 1. Build T_world_tag (4x4 homogeneous transform) ===
         tag_x = tag_world['x']
         tag_y = tag_world['y']
-        tag_yaw = tag_world['yaw']  # Direction tag is facing
+        tag_z = tag_world['z']
+        tag_yaw = tag_world['yaw']
         
-        # Robot is behind the tag (from tag's perspective)
-        # Compute robot position relative to tag
+        # Rotation matrix for tag orientation (yaw around Z-axis)
+        cos_yaw = np.cos(tag_yaw)
+        sin_yaw = np.sin(tag_yaw)
+        R_world_tag = np.array([
+            [cos_yaw, -sin_yaw, 0],
+            [sin_yaw,  cos_yaw, 0],
+            [0,        0,       1]
+        ])
         
-        # Simplified estimation:
-        # - Robot is 'distance' away from tag
-        # - Robot is looking at the tag
+        T_world_tag = np.eye(4)
+        T_world_tag[:3, :3] = R_world_tag
+        T_world_tag[:3, 3] = [tag_x, tag_y, tag_z]
         
-        # The tag faces a certain direction (tag_yaw)
-        # Robot sees the tag, so robot is roughly opposite to tag_yaw
+        # === 2. Build T_camera_tag from solvePnP output ===
+        T_camera_tag = np.eye(4)
+        T_camera_tag[:3, :3] = pose_R
+        T_camera_tag[:3, 3] = pose_t.flatten()
         
-        # Robot orientation: facing the tag means robot_yaw ≈ tag_yaw + π
-        robot_yaw = tag_yaw + np.pi - angle_to_tag
+        # === 3. Invert to get T_tag_camera ===
+        T_tag_camera = np.linalg.inv(T_camera_tag)
         
-        # Robot position: distance away from tag in the direction robot is facing
-        robot_x = tag_x - distance * np.cos(robot_yaw)
-        robot_y = tag_y - distance * np.sin(robot_yaw)
+        # === 4. Build T_camera_base (camera mounted on robot) ===
+        # Camera is at (0.15, 0, 0.15) relative to base_link, facing forward
+        # This is a fixed transform - no rotation from base to camera
+        T_camera_base = np.eye(4)
+        T_camera_base[:3, 3] = [-0.15, 0, -0.15]  # Inverse: base is behind camera
         
-        # Normalize yaw
-        while robot_yaw > np.pi:
-            robot_yaw -= 2 * np.pi
-        while robot_yaw < -np.pi:
-            robot_yaw += 2 * np.pi
+        # === 5. Chain transformations: T_world_base = T_world_tag × T_tag_camera × T_camera_base ===
+        T_world_camera = T_world_tag @ T_tag_camera
+        T_world_base = T_world_camera @ T_camera_base
+        
+        # === 6. Extract 2D pose (x, y, yaw) from T_world_base ===
+        robot_x = T_world_base[0, 3]
+        robot_y = T_world_base[1, 3]
+        
+        # Extract yaw from rotation matrix
+        # For a 2D rotation around Z: R = [[cos, -sin, 0], [sin, cos, 0], [0, 0, 1]]
+        # yaw = atan2(R[1,0], R[0,0])
+        robot_yaw = np.arctan2(T_world_base[1, 0], T_world_base[0, 0])
+        
+        # Normalize yaw to [-pi, pi]
+        robot_yaw = np.arctan2(np.sin(robot_yaw), np.cos(robot_yaw))
         
         return (robot_x, robot_y, robot_yaw)
     
@@ -379,24 +380,18 @@ class AprilTagLocalizer(Node):
         
         # Sanity check 1: reject poses outside valid grid bounds (0-5m with some margin)
         if x < -0.5 or x > 5.5 or y < -0.5 or y > 5.5:
-            self.get_logger().warn(
-                f'Rejecting Tag {tag_id} detection: pose ({x:.2f},{y:.2f}) outside grid bounds',
-                throttle_duration_sec=2.0
-            )
+            # Silently reject out-of-bounds detections
             return
         
-        # Sanity check 2: if we have odometry, reject if pose differs by > 1.5m
-        # (indicates bad pose estimation algorithm)
+        # Sanity check 2: if we have odometry, reject if pose differs by > 0.5m
+        # Only accept corrections that are already close to current estimate (fine-tuning only)
         if self.current_odom is not None:
             odom_x = self.current_odom.pose.pose.position.x
             odom_y = self.current_odom.pose.pose.position.y
             diff = np.sqrt((x - odom_x)**2 + (y - odom_y)**2)
             
-            if diff > 1.5:
-                self.get_logger().warn(
-                    f'Rejecting Tag {tag_id}: pose ({x:.2f},{y:.2f}) differs {diff:.2f}m from odom ({odom_x:.2f},{odom_y:.2f})',
-                    throttle_duration_sec=2.0
-                )
+            if diff > 0.5:
+                # Silently reject detections that differ too much from odometry
                 return
         
         pose_msg = PoseWithCovarianceStamped()

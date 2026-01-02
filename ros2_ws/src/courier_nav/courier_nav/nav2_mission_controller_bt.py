@@ -109,14 +109,32 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         target_yaw = self.blackboard.get("target_yaw")
         current_target = self.blackboard.get("current_target")
         
-        # Check obstacle
-        if node.front_distance < node.obstacle_threshold:
+        # Check obstacle with adaptive threshold based on target proximity to walls
+        # When targeting cells near boundaries, use smaller obstacle threshold
+        target_near_edge = (target_x < 0.3 or target_x > 3.7 or target_y < 0.3 or target_y > 3.7)
+        obstacle_threshold = 0.35 if target_near_edge else node.obstacle_threshold
+        
+        if node.front_distance < obstacle_threshold:
             node.stop_robot()
-            node.get_logger().warn(f'OBSTACLE at {node.front_distance:.2f}m!')
+            node.get_logger().warn(f'OBSTACLE at {node.front_distance:.2f}m (threshold={obstacle_threshold:.2f}m)!')
             return py_trees.common.Status.FAILURE
         
-        # Check boundaries
-        if node.robot_x < -0.4 or node.robot_x > 4.4 or node.robot_y < -0.4 or node.robot_y > 4.4:
+        # Check boundaries with relaxed constraints for edge cells
+        # Allow robot to be closer to boundary when targeting edge cells
+        boundary_margin = 0.4
+        
+        # If target is near edge (x or y close to 0 or 4), relax boundary check
+        target_near_west = target_x < 0.3
+        target_near_east = target_x > 3.7
+        target_near_south = target_y < 0.3
+        target_near_north = target_y > 3.7
+        
+        # Use tighter boundary for edge targets
+        if target_near_west or target_near_east or target_near_south or target_near_north:
+            boundary_margin = 0.2  # Allow closer to wall for edge cells
+        
+        if node.robot_x < -boundary_margin or node.robot_x > (4.0 + boundary_margin) or \
+           node.robot_y < -boundary_margin or node.robot_y > (4.0 + boundary_margin):
             node.stop_robot()
             node.get_logger().warn(f'BOUNDARY! Robot at ({node.robot_x:.2f}, {node.robot_y:.2f})')
             return py_trees.common.Status.FAILURE
@@ -731,23 +749,18 @@ class BehaviorTreeController(Node):
         cov_y = msg.pose.covariance[7]  # y variance
         avg_covariance = (cov_x + cov_y) / 2.0
         
-        # Reject detections with medium-high uncertainty (conservative threshold)
-        # Current pose estimation algorithm is unreliable, so be very strict
-        if avg_covariance > 0.3:  # Reject tags beyond ~1.5m distance
-            if not hasattr(self, '_last_reject_log') or \
-               (self.get_clock().now().nanoseconds - self._last_reject_log) > 3_000_000_000:
-                self.get_logger().debug(
-                    f'Rejecting AprilTag: covariance {avg_covariance:.2f} too high (>0.3 threshold)'
-                )
-                self._last_reject_log = self.get_clock().now().nanoseconds
+        # Reject detections with medium-high uncertainty (very conservative)
+        # Use AprilTags only for fine-tuning, not major corrections
+        if avg_covariance > 0.25:  # Reject tags beyond ~1.3m distance
+            # Silently reject high-covariance detections
             return
         
         # Calculate dynamic weight based on tag confidence
-        # Use VERY conservative weights to prevent erratic movement
-        # Close tags (cov=0.05) get weight ~3%
-        # Medium tags (cov=0.2) get weight ~0.8%
-        # Far tags (cov>0.3) are rejected above
-        dynamic_weight = min(0.03, 0.001 / avg_covariance) if avg_covariance > 0.01 else 0.03
+        # Use VERY LOW weights to prevent robot confusion - AprilTags are for drift correction only
+        # Close tags (cov=0.05, ~0.5m) get weight ~5%
+        # Medium tags (cov=0.15, ~1.0m) get weight ~1.7%
+        # Far tags (cov>0.25, >1.3m) are rejected above
+        dynamic_weight = min(0.05, 0.0025 / avg_covariance) if avg_covariance > 0.01 else 0.05
         
         # Blend AprilTag pose with current odometry estimate
         # This gradually corrects drift without sudden jumps
@@ -762,15 +775,13 @@ class BehaviorTreeController(Node):
         self.last_apriltag_pose = (tag_x, tag_y, tag_yaw)
         self.last_apriltag_time = self.get_clock().now()
         
-        # Log correction (throttled)
-        if not hasattr(self, '_last_tag_log') or \
-           (self.get_clock().now().nanoseconds - self._last_tag_log) > 3_000_000_000:
-            self.get_logger().info(
-                f'📍 AprilTag correction: '
-                f'pose=({self.robot_x:.2f}, {self.robot_y:.2f}, {math.degrees(self.robot_yaw):.1f}°) '
-                f'weight={dynamic_weight:.2f} cov={avg_covariance:.3f}'
-            )
-            self._last_tag_log = self.get_clock().now().nanoseconds
+        # Log each successful correction
+        self.get_logger().info(
+            f'✓ AprilTag correction applied: '
+            f'weight={dynamic_weight*100:.1f}% '
+            f'pose=({self.robot_x:.2f}, {self.robot_y:.2f}, {math.degrees(self.robot_yaw):.0f}°) '
+            f'cov={avg_covariance:.3f}'
+        )
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
