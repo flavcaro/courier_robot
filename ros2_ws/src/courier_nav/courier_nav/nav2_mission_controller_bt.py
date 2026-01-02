@@ -15,7 +15,7 @@ Architecture:
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker, MarkerArray
@@ -461,6 +461,11 @@ class BehaviorTreeController(Node):
         self.robot_y = 0.0
         self.robot_yaw = 0.0
         
+        # === AprilTag Localization ===
+        self.last_apriltag_pose = None
+        self.apriltag_correction_weight = 0.3  # 30% tag, 70% odometry
+        self.last_apriltag_time = None
+        
         # === Control Parameters ===
         self.rotation_speed = 0.5
         self.linear_speed = 0.25
@@ -480,6 +485,8 @@ class BehaviorTreeController(Node):
             Odometry, '/odom', self.odom_callback, 10)
         self.scan_sub = self.create_subscription(
             LaserScan, '/scan', self.scan_callback, 10)
+        self.apriltag_sub = self.create_subscription(
+            PoseWithCovarianceStamped, '/apriltag_pose', self.apriltag_callback, 10)
         
         # === Behavior Tree Setup ===
         self.tree = None
@@ -707,6 +714,63 @@ class BehaviorTreeController(Node):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    def apriltag_callback(self, msg):
+        """Apply AprilTag localization correction to reduce odometry drift."""
+        # Extract pose from AprilTag detection
+        tag_x = msg.pose.pose.position.x
+        tag_y = msg.pose.pose.position.y
+        
+        # Extract yaw from quaternion
+        qz = msg.pose.pose.orientation.z
+        qw = msg.pose.pose.orientation.w
+        tag_yaw = math.atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
+        
+        # Get covariance (confidence based on distance)
+        cov_x = msg.pose.covariance[0]  # x variance
+        cov_y = msg.pose.covariance[7]  # y variance
+        avg_covariance = (cov_x + cov_y) / 2.0
+        
+        # Reject detections with medium-high uncertainty (conservative threshold)
+        # Current pose estimation algorithm is unreliable, so be very strict
+        if avg_covariance > 0.3:  # Reject tags beyond ~1.5m distance
+            if not hasattr(self, '_last_reject_log') or \
+               (self.get_clock().now().nanoseconds - self._last_reject_log) > 3_000_000_000:
+                self.get_logger().debug(
+                    f'Rejecting AprilTag: covariance {avg_covariance:.2f} too high (>0.3 threshold)'
+                )
+                self._last_reject_log = self.get_clock().now().nanoseconds
+            return
+        
+        # Calculate dynamic weight based on tag confidence
+        # Use VERY conservative weights to prevent erratic movement
+        # Close tags (cov=0.05) get weight ~3%
+        # Medium tags (cov=0.2) get weight ~0.8%
+        # Far tags (cov>0.3) are rejected above
+        dynamic_weight = min(0.03, 0.001 / avg_covariance) if avg_covariance > 0.01 else 0.03
+        
+        # Blend AprilTag pose with current odometry estimate
+        # This gradually corrects drift without sudden jumps
+        self.robot_x = (1 - dynamic_weight) * self.robot_x + dynamic_weight * tag_x
+        self.robot_y = (1 - dynamic_weight) * self.robot_y + dynamic_weight * tag_y
+        
+        # Angular correction with wraparound handling
+        angle_diff = self.normalize_angle(tag_yaw - self.robot_yaw)
+        self.robot_yaw = self.normalize_angle(self.robot_yaw + dynamic_weight * angle_diff)
+        
+        # Store for diagnostics
+        self.last_apriltag_pose = (tag_x, tag_y, tag_yaw)
+        self.last_apriltag_time = self.get_clock().now()
+        
+        # Log correction (throttled)
+        if not hasattr(self, '_last_tag_log') or \
+           (self.get_clock().now().nanoseconds - self._last_tag_log) > 3_000_000_000:
+            self.get_logger().info(
+                f'📍 AprilTag correction: '
+                f'pose=({self.robot_x:.2f}, {self.robot_y:.2f}, {math.degrees(self.robot_yaw):.1f}°) '
+                f'weight={dynamic_weight:.2f} cov={avg_covariance:.3f}'
+            )
+            self._last_tag_log = self.get_clock().now().nanoseconds
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""

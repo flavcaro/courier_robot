@@ -84,13 +84,13 @@ class AprilTagLocalizer(Node):
         # Camera intrinsics (will be updated from camera_info)
         self.camera_matrix = None
         self.dist_coeffs = None
-        self.fx = 277.0  # Default focal length
-        self.fy = 277.0
-        self.cx = 160.0  # Default principal point
-        self.cy = 120.0
+        self.fx = 554.0  # Default focal length for 640x480 @ 90deg FOV
+        self.fy = 554.0
+        self.cx = 320.0  # Default principal point (half of 640)
+        self.cy = 240.0  # Default principal point (half of 480)
         
         # Tag size in meters (updated to match world_spawner)
-        self.tag_size = 0.15
+        self.tag_size = 0.20  # Wall tags are 20cm
         
         # CV Bridge for image conversion
         self.bridge = CvBridge()
@@ -99,17 +99,22 @@ class AprilTagLocalizer(Node):
         if USE_PUPIL_APRILTAGS:
             self.detector = Detector(
                 families='tag36h11',
-                nthreads=1,
+                nthreads=2,
                 quad_decimate=1.0,
                 quad_sigma=0.0,
                 refine_edges=1,
                 decode_sharpening=0.25,
+                debug=0
             )
             self.get_logger().info('Using pupil_apriltags detector')
         else:
             # Use OpenCV ArUco as fallback (similar to AprilTag)
             self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
             self.aruco_params = cv2.aruco.DetectorParameters()
+            # Adjust parameters for better detection
+            self.aruco_params.adaptiveThreshWinSizeMin = 3
+            self.aruco_params.adaptiveThreshWinSizeMax = 23
+            self.aruco_params.adaptiveThreshWinSizeStep = 10
             self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
             self.get_logger().info('Using OpenCV ArUco detector (AprilTag 36h11)')
         
@@ -167,7 +172,7 @@ class AprilTagLocalizer(Node):
     def image_callback(self, msg):
         """Process camera image to detect AprilTags."""
         if self.camera_matrix is None:
-            self.get_logger().warn('No camera_info yet — skipping image processing')
+            self.get_logger().warn('No camera_info yet — skipping image processing', throttle_duration_sec=2.0)
             return
         
         try:
@@ -182,6 +187,16 @@ class AprilTagLocalizer(Node):
         
         # Detect AprilTags
         detections = self.detect_tags(gray)
+        
+        # Log detection status periodically
+        now = self.get_clock().now().nanoseconds / 1e9
+        if (now - self._last_detection_log) > self._detection_log_interval:
+            if detections:
+                tag_ids = [d['id'] for d in detections]
+                self.get_logger().info(f'Detected {len(detections)} tag(s): {tag_ids}')
+            else:
+                self.get_logger().info('No tags detected in current frame')
+            self._last_detection_log = now
         
         if detections:
             self.process_detections(detections, cv_image, msg.header.stamp)
@@ -362,6 +377,28 @@ class AprilTagLocalizer(Node):
         """Publish robot pose estimate."""
         x, y, yaw = robot_pose
         
+        # Sanity check 1: reject poses outside valid grid bounds (0-5m with some margin)
+        if x < -0.5 or x > 5.5 or y < -0.5 or y > 5.5:
+            self.get_logger().warn(
+                f'Rejecting Tag {tag_id} detection: pose ({x:.2f},{y:.2f}) outside grid bounds',
+                throttle_duration_sec=2.0
+            )
+            return
+        
+        # Sanity check 2: if we have odometry, reject if pose differs by > 1.5m
+        # (indicates bad pose estimation algorithm)
+        if self.current_odom is not None:
+            odom_x = self.current_odom.pose.pose.position.x
+            odom_y = self.current_odom.pose.pose.position.y
+            diff = np.sqrt((x - odom_x)**2 + (y - odom_y)**2)
+            
+            if diff > 1.5:
+                self.get_logger().warn(
+                    f'Rejecting Tag {tag_id}: pose ({x:.2f},{y:.2f}) differs {diff:.2f}m from odom ({odom_x:.2f},{odom_y:.2f})',
+                    throttle_duration_sec=2.0
+                )
+                return
+        
         pose_msg = PoseWithCovarianceStamped()
         pose_msg.header.stamp = stamp
         # This pose is an estimate in the world/map frame
@@ -375,34 +412,18 @@ class AprilTagLocalizer(Node):
         pose_msg.pose.pose.orientation.z = np.sin(yaw / 2)
         pose_msg.pose.pose.orientation.w = np.cos(yaw / 2)
         
-        # Covariance based on distance (further = less certain)
-        base_cov = 0.1 * distance
+        # Covariance based on distance with exponential penalty
+        # Close tags (0.5m) -> 0.05 covariance
+        # Medium tags (1.5m) -> 0.15 covariance  
+        # Far tags (3m+) -> very high covariance (low confidence)
+        base_cov = 0.05 * (distance ** 1.5)  # Exponential growth with distance
         pose_msg.pose.covariance[0] = base_cov  # x
         pose_msg.pose.covariance[7] = base_cov  # y
-        pose_msg.pose.covariance[35] = 0.1  # yaw
+        pose_msg.pose.covariance[35] = 0.15 * distance  # yaw uncertainty grows with distance
         
         self.pose_pub.publish(pose_msg)
-        # Also broadcast a map->odom correction transform so the rest of the
-        # system (AMCL/Nav2) can use this as a pose correction.
-        try:
-            t = TransformStamped()
-            t.header.stamp = stamp
-            t.header.frame_id = 'map'
-            t.child_frame_id = 'odom'
-            t.transform.translation.x = float(x)
-            t.transform.translation.y = float(y)
-            t.transform.translation.z = 0.0
-            qz = float(np.sin(yaw / 2.0))
-            qw = float(np.cos(yaw / 2.0))
-            # Set quaternion (x,y) = 0 because we only rotate around Z
-            t.transform.rotation.x = 0.0
-            t.transform.rotation.y = 0.0
-            t.transform.rotation.z = qz
-            t.transform.rotation.w = qw
-            self.tf_broadcaster.sendTransform(t)
-            self.get_logger().debug(f'Broadcasted map->odom from tag {tag_id}: ({x:.2f},{y:.2f},{math.degrees(yaw):.1f}deg)')
-        except Exception as e:
-            self.get_logger().error(f'Failed to broadcast TF map->odom: {e}')
+        # Don't broadcast TF here - let the mission controller handle fusion
+        # Broadcasting map->odom here causes timestamp conflicts with odometry
     
     def publish_debug_image(self, cv_image, detections, stamp):
         """Publish debug image with detected tags highlighted."""

@@ -30,6 +30,17 @@ if ! ros2 pkg list 2>/dev/null | grep -q "cv_bridge"; then
     echo "✅ cv_bridge installato!"
 fi
 
+# Genera AprilTag images se non esistono
+echo "📦 Verifica AprilTag images..."
+APRILTAG_DIR="/home/ubuntu/ros2_ws/src/courier_nav/courier_nav/apriltag_images"
+if [ ! -d "$APRILTAG_DIR" ] || [ -z "$(ls -A $APRILTAG_DIR 2>/dev/null)" ]; then
+    echo "⚠️  AprilTag images non trovate. Generazione in corso..."
+    python3 /home/ubuntu/ros2_ws/src/courier_nav/courier_nav/generate_apriltags.py
+    echo "✅ AprilTag images generate!"
+else
+    echo "✅ AprilTag images già presenti ($(ls $APRILTAG_DIR/*.png 2>/dev/null | wc -l) files)"
+fi
+
 # Verifica e installa Nav2
 echo "📦 Verifica Nav2..."
 NAV2_CHECK=$(ros2 pkg list 2>/dev/null | grep "nav2_bringup" || true)

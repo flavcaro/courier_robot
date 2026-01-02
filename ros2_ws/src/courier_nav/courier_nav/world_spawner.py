@@ -93,6 +93,57 @@ class WorldSpawner(Node):
   </model>
 </sdf>'''
     
+    def get_apriltag_sdf(self, tag_id: int, size: float, thickness: float, orientation: str = 'XZ') -> str:
+        """Generate SDF for an AprilTag marker using actual PNG texture.
+        
+        Args:
+            tag_id: Unique tag identifier (0-27 for our simulation)
+            size: Size of the tag square
+            thickness: Thickness of the tag panel
+            orientation: 'XZ' for north/south walls (wide in X), 'YZ' for west/east walls (wide in Y)
+        """
+        
+        if orientation == 'XZ':
+            # Panel wide in X direction (for north/south walls)
+            panel_dims = f'{size} {thickness} {size}'
+        else:  # YZ
+            # Panel wide in Y direction (for west/east walls)
+            panel_dims = f'{thickness} {size} {size}'
+        
+        # Path to the generated AprilTag PNG image
+        # Images should be in the courier_nav package's apriltag_images directory
+        tag_image_path = f'file:///home/ubuntu/ros2_ws/src/courier_nav/courier_nav/apriltag_images/tag_{tag_id}.png'
+        
+        return f'''<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="apriltag_{tag_id}">
+    <static>true</static>
+    <link name="link">
+      <visual name="tag_visual">
+        <geometry><box><size>{panel_dims}</size></box></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>{tag_image_path}</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="id_marker">
+        <pose>0 0 {size*0.55} 0 0 0</pose>
+        <geometry><box><size>{size*0.15} {thickness*2.0} {size*0.08}</size></box></geometry>
+        <material>
+          <ambient>1 0.5 0 1</ambient>
+          <diffuse>1 0.5 0 1</diffuse>
+          <emissive>0.8 0.4 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>'''
+    
     def get_cylinder_sdf(self, radius: float, length: float,
                         r: float, g: float, b: float) -> str:
         """Generate SDF for a cylinder."""
@@ -182,74 +233,60 @@ class WorldSpawner(Node):
         # 5. APRILTAG MARKERS (mounted ON walls - flat against surface)
         self.get_logger().info('Spawning AprilTag markers...')
         # Wall-mounted tags: flat against wall surfaces, facing INTO the room
-        # Use different box dimensions based on wall orientation (no yaw rotation needed)
+        # Using high-contrast patterns for better detection
         
         tag_id = 0
+        tag_size = 0.20
         
-        # South wall (y = 0.01) - tags face NORTH, panel in XZ plane
+        # South wall (y = 0.02) - tags face NORTH, panel in XZ plane
         for x_pos in [0.5, 2.5, 4.5]:
-            panel_sdf = self.get_box_sdf(0.20, 0.005, 0.20, 1.0, 1.0, 1.0)  # wide in X, thin in Y
-            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, x_pos, 0.01, 0.15)
-            pattern_sdf = self.get_box_sdf(0.14, 0.008, 0.14, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, x_pos, 0.02, 0.15)
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size, 0.01, 'XZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x_pos, 0.02, 0.15)
             tag_id += 1
         
-        # North wall (y = 4.99) - tags face SOUTH, panel in XZ plane
+        # North wall (y = 4.98) - tags face SOUTH, panel in XZ plane  
         for x_pos in [0.5, 2.5, 4.5]:
-            panel_sdf = self.get_box_sdf(0.20, 0.005, 0.20, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, x_pos, 4.99, 0.15)
-            pattern_sdf = self.get_box_sdf(0.14, 0.008, 0.14, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, x_pos, 4.98, 0.15)
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size, 0.01, 'XZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x_pos, 4.98, 0.15)
             tag_id += 1
         
-        # West wall (x = 0.01) - tags face EAST, panel in YZ plane
+        # West wall (x = 0.02) - tags face EAST, panel in YZ plane
         for y_pos in [0.5, 2.5, 4.5]:
-            panel_sdf = self.get_box_sdf(0.005, 0.20, 0.20, 1.0, 1.0, 1.0)  # thin in X, wide in Y
-            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, 0.01, y_pos, 0.15)
-            pattern_sdf = self.get_box_sdf(0.008, 0.14, 0.14, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, 0.02, y_pos, 0.15)
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size, 0.01, 'YZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, 0.02, y_pos, 0.15)
             tag_id += 1
         
-        # East wall (x = 4.99) - tags face WEST, panel in YZ plane
+        # East wall (x = 4.98) - tags face WEST, panel in YZ plane
         for y_pos in [0.5, 2.5, 4.5]:
-            panel_sdf = self.get_box_sdf(0.005, 0.20, 0.20, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_bg_{tag_id}', panel_sdf, 4.99, y_pos, 0.15)
-            pattern_sdf = self.get_box_sdf(0.008, 0.14, 0.14, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_pattern_{tag_id}', pattern_sdf, 4.98, y_pos, 0.15)
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size, 0.01, 'YZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, 4.98, y_pos, 0.15)
             tag_id += 1
         
         # Obstacle-mounted tags (vertical, on sides - flat against surface)
         self.get_logger().info('Spawning AprilTags on obstacles...')
+        tag_size_obs = 0.15
         for (row, col) in self.obstacles:
             x = col * self.cell_size + self.cell_size / 2
             y = row * self.cell_size + self.cell_size / 2
             
-            # South side (y - 0.46) - faces NORTH, panel in XZ plane
-            panel_sdf = self.get_box_sdf(0.15, 0.005, 0.15, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x, y - 0.46, 0.25)
-            pattern_sdf = self.get_box_sdf(0.10, 0.008, 0.10, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x, y - 0.45, 0.25)
+            # South side (y - 0.45) - faces NORTH, panel in XZ plane
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size_obs, 0.01, 'XZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x, y - 0.45, 0.25)
             tag_id += 1
             
-            # North side (y + 0.46) - faces SOUTH, panel in XZ plane
-            panel_sdf = self.get_box_sdf(0.15, 0.005, 0.15, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x, y + 0.46, 0.25)
-            pattern_sdf = self.get_box_sdf(0.10, 0.008, 0.10, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x, y + 0.45, 0.25)
+            # North side (y + 0.45) - faces SOUTH, panel in XZ plane
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size_obs, 0.01, 'XZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x, y + 0.45, 0.25)
             tag_id += 1
             
-            # West side (x - 0.46) - faces EAST, panel in YZ plane
-            panel_sdf = self.get_box_sdf(0.005, 0.15, 0.15, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x - 0.46, y, 0.25)
-            pattern_sdf = self.get_box_sdf(0.008, 0.10, 0.10, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x - 0.45, y, 0.25)
+            # West side (x - 0.45) - faces EAST, panel in YZ plane
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size_obs, 0.01, 'YZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x - 0.45, y, 0.25)
             tag_id += 1
             
-            # East side (x + 0.46) - faces WEST, panel in YZ plane
-            panel_sdf = self.get_box_sdf(0.005, 0.15, 0.15, 1.0, 1.0, 1.0)
-            self.spawn_sdf(f'tag_obs_bg_{tag_id}', panel_sdf, x + 0.46, y, 0.25)
-            pattern_sdf = self.get_box_sdf(0.008, 0.10, 0.10, 0.1, 0.1, 0.1)
-            self.spawn_sdf(f'tag_obs_pattern_{tag_id}', pattern_sdf, x + 0.45, y, 0.25)
+            # East side (x + 0.45) - faces WEST, panel in YZ plane
+            tag_sdf = self.get_apriltag_sdf(tag_id, tag_size_obs, 0.01, 'YZ')
+            self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x + 0.45, y, 0.25)
             tag_id += 1
         
         # 6. START MARKER (green circle)
