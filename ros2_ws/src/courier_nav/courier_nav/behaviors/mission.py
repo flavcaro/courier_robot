@@ -1,0 +1,144 @@
+"""Mission-related behaviors for object collection and delivery."""
+
+import py_trees
+from py_trees import common
+from collections import deque
+
+
+class CollectObject(py_trees.behaviour.Behaviour):
+    """4-second gripper animation for object collection."""
+    
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.blackboard = self.attach_blackboard_client(name=self.name)
+        self.blackboard.register_key(key="node", access=common.Access.READ)
+        self.blackboard.register_key(key="object_collected", access=common.Access.WRITE)
+        self.animation_start = None
+        self.animation_step = 0
+        
+    def initialise(self):
+        """Start animation."""
+        node = self.blackboard.get("node")
+        self.animation_start = node.get_clock().now()
+        self.animation_step = 0
+        node.get_logger().info('='*50)
+        node.get_logger().info('REACHED GOAL! Collecting object...')
+        node.get_logger().info('='*50)
+        node.stop_robot()
+        
+    def update(self):
+        """Run animation steps."""
+        node = self.blackboard.get("node")
+        
+        if self.animation_start is None:
+            return py_trees.common.Status.FAILURE
+        
+        elapsed = (node.get_clock().now() - self.animation_start).nanoseconds / 1e9
+        
+        if elapsed < 1.0 and self.animation_step == 0:
+            node.get_logger().info('🤖 Activating gripper...')
+            node.get_logger().info('   Opening gripper...')
+            self.animation_step = 1
+        elif 1.0 <= elapsed < 2.0 and self.animation_step == 1:
+            node.get_logger().info('   Lowering arm...')
+            self.animation_step = 2
+        elif 2.0 <= elapsed < 3.0 and self.animation_step == 2:
+            node.get_logger().info('   Closing gripper...')
+            self.animation_step = 3
+        elif 3.0 <= elapsed < 4.0 and self.animation_step == 3:
+            node.get_logger().info('   Lifting arm...')
+            self.animation_step = 4
+        elif elapsed >= 4.0 and self.animation_step == 4:
+            node.get_logger().info('✅ Object collected!')
+            self.blackboard.set("object_collected", True)
+            return py_trees.common.Status.SUCCESS
+        
+        return py_trees.common.Status.RUNNING
+
+
+class DeliverObject(py_trees.behaviour.Behaviour):
+    """4-second gripper animation for object delivery."""
+    
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.blackboard = self.attach_blackboard_client(name=self.name)
+        self.blackboard.register_key(key="node", access=common.Access.READ)
+        self.animation_start = None
+        self.animation_step = 0
+        
+    def initialise(self):
+        """Start animation."""
+        node = self.blackboard.get("node")
+        self.animation_start = node.get_clock().now()
+        self.animation_step = 0
+        node.get_logger().info('='*50)
+        node.get_logger().info('RETURNED HOME! Delivering object...')
+        node.get_logger().info('='*50)
+        node.stop_robot()
+        
+    def update(self):
+        """Run animation steps."""
+        node = self.blackboard.get("node")
+        
+        if self.animation_start is None:
+            return py_trees.common.Status.FAILURE
+        
+        elapsed = (node.get_clock().now() - self.animation_start).nanoseconds / 1e9
+        
+        if elapsed < 1.0 and self.animation_step == 0:
+            node.get_logger().info('📦 Delivering object...')
+            node.get_logger().info('   Lowering arm...')
+            self.animation_step = 1
+        elif 1.0 <= elapsed < 2.0 and self.animation_step == 1:
+            node.get_logger().info('   Opening gripper...')
+            self.animation_step = 2
+        elif 2.0 <= elapsed < 3.0 and self.animation_step == 2:
+            node.get_logger().info('   Releasing object...')
+            self.animation_step = 3
+        elif 3.0 <= elapsed < 4.0 and self.animation_step == 3:
+            node.get_logger().info('   Raising arm...')
+            self.animation_step = 4
+        elif elapsed >= 4.0 and self.animation_step == 4:
+            node.get_logger().info('✅ Object delivered!')
+            node.get_logger().info('='*50)
+            node.get_logger().info('🎉 MISSION COMPLETE!')
+            node.get_logger().info('='*50)
+            return py_trees.common.Status.SUCCESS
+        
+        return py_trees.common.Status.RUNNING
+
+
+class PlanReturnPath(py_trees.behaviour.Behaviour):
+    """Plan BFS path back to home."""
+    
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.blackboard = self.attach_blackboard_client(name=self.name)
+        self.blackboard.register_key(key="node", access=common.Access.READ)
+        self.blackboard.register_key(key="path_queue", access=common.Access.WRITE)
+        self.blackboard.register_key(key="returning_home", access=common.Access.WRITE)
+        
+    def update(self):
+        """Calculate return path."""
+        node = self.blackboard.get("node")
+        
+        node.get_logger().info('='*50)
+        node.get_logger().info('PLANNING RETURN PATH TO HOME')
+        node.get_logger().info('='*50)
+        
+        current_cell = node.world_to_cell(node.robot_x, node.robot_y)
+        node.get_logger().info(f'Current: {current_cell} -> Home: {node.start_cell}')
+        
+        path = node.bfs_path(current_cell, node.start_cell)
+        
+        if path:
+            self.blackboard.set("path_queue", deque(path))
+            self.blackboard.set("returning_home", True)
+            node.get_logger().info(f'RETURN PATH FOUND with {len(path)} waypoints')
+            for i, cell in enumerate(path):
+                wx, wy = node.cell_to_world(cell[0], cell[1])
+                node.get_logger().info(f'  {i+1}. Cell{cell} -> ({wx:.2f}, {wy:.2f})')
+            return py_trees.common.Status.SUCCESS
+        else:
+            node.get_logger().error('NO RETURN PATH FOUND!')
+            return py_trees.common.Status.FAILURE

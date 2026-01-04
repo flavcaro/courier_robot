@@ -45,7 +45,10 @@ def generate_launch_description():
 
         ),
 
-        launch_arguments={'gz_args': '-r empty.sdf'}.items(),
+        launch_arguments={
+            'gz_args': '-r empty.sdf',
+            'gui_config': os.path.join(get_package_share_directory(pkg_name), 'config', 'gui.config')
+        }.items(),
 
     )
  
