@@ -1,4 +1,4 @@
-# Courier Robot Docker Image with Nav2
+# Courier Robot Docker Image with Behavior Tree Navigation
 # Based on tiryoh/ros2-desktop-vnc:jazzy
 
 FROM tiryoh/ros2-desktop-vnc:jazzy
@@ -11,30 +11,8 @@ RUN rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
     apt-get update --fix-missing || apt-get update || true
 
-# Install Nav2 and dependencies (with retry logic)
+# Install ROS2 dependencies (with retry logic)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-jazzy-navigation2 \
-    ros-jazzy-nav2-bringup \
-    ros-jazzy-nav2-simple-commander \
-    ros-jazzy-nav2-msgs \
-    ros-jazzy-nav2-lifecycle-manager \
-    ros-jazzy-nav2-map-server \
-    ros-jazzy-nav2-amcl \
-    ros-jazzy-nav2-controller \
-    ros-jazzy-nav2-planner \
-    ros-jazzy-nav2-behaviors \
-    ros-jazzy-nav2-bt-navigator \
-    ros-jazzy-nav2-waypoint-follower \
-    ros-jazzy-nav2-smoother \
-    ros-jazzy-nav2-velocity-smoother \
-    ros-jazzy-nav2-costmap-2d \
-    ros-jazzy-nav2-core \
-    ros-jazzy-nav2-util \
-    ros-jazzy-nav2-common \
-    ros-jazzy-dwb-core \
-    ros-jazzy-dwb-plugins \
-    ros-jazzy-dwb-critics \
-    ros-jazzy-nav2-navfn-planner \
     ros-jazzy-robot-state-publisher \
     ros-jazzy-tf2-ros \
     ros-jazzy-tf2-tools \
@@ -42,28 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-cv-bridge \
     ros-jazzy-image-transport \
     || (apt-get update --fix-missing && apt-get install -y --no-install-recommends \
-    ros-jazzy-navigation2 \
-    ros-jazzy-nav2-bringup \
-    ros-jazzy-nav2-simple-commander \
-    ros-jazzy-nav2-msgs \
-    ros-jazzy-nav2-lifecycle-manager \
-    ros-jazzy-nav2-map-server \
-    ros-jazzy-nav2-amcl \
-    ros-jazzy-nav2-controller \
-    ros-jazzy-nav2-planner \
-    ros-jazzy-nav2-behaviors \
-    ros-jazzy-nav2-bt-navigator \
-    ros-jazzy-nav2-waypoint-follower \
-    ros-jazzy-nav2-smoother \
-    ros-jazzy-nav2-velocity-smoother \
-    ros-jazzy-nav2-costmap-2d \
-    ros-jazzy-nav2-core \
-    ros-jazzy-nav2-util \
-    ros-jazzy-nav2-common \
-    ros-jazzy-dwb-core \
-    ros-jazzy-dwb-plugins \
-    ros-jazzy-dwb-critics \
-    ros-jazzy-nav2-navfn-planner \
     ros-jazzy-robot-state-publisher \
     ros-jazzy-tf2-ros \
     ros-jazzy-tf2-tools \

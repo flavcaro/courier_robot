@@ -3,7 +3,7 @@
 <package format="3">
   <name>courier_nav</name>
   <version>0.0.0</version>
-  <description>Courier robot navigation with Nav2 integration</description>
+  <description>Courier robot navigation with Behavior Tree</description>
   <maintainer email="ubuntu@todo.todo">ubuntu</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,24 +11,9 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>gazebo_msgs</depend>
-  
-  <!-- Nav2 dependencies -->
-  <depend>nav2_common</depend>
-  <depend>nav2_bringup</depend>
-  <depend>nav2_bt_navigator</depend>
-  <depend>nav2_controller</depend>
-  <depend>nav2_planner</depend>
-  <depend>nav2_behaviors</depend>
-  <depend>nav2_lifecycle_manager</depend>
-  <depend>nav2_map_server</depend>
-  <depend>nav2_amcl</depend>
-  <depend>nav2_smoother</depend>
-  <depend>nav2_velocity_smoother</depend>
-  <depend>nav2_waypoint_follower</depend>
-  <depend>nav2_msgs</depend>
-  <depend>nav2_simple_commander</depend>
   
   <!-- TF and robot state -->
   <depend>tf2</depend>

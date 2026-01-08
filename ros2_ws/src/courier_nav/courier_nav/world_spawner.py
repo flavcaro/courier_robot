@@ -12,6 +12,8 @@ from rclpy.node import Node
 import subprocess
 import time
 import math
+import os
+from ament_index_python.packages import get_package_share_directory
 
 
 class WorldSpawner(Node):
@@ -111,8 +113,16 @@ class WorldSpawner(Node):
             panel_dims = f'{thickness} {size} {size}'
         
         # Path to the generated AprilTag PNG image
-        # Images should be in the courier_nav package's apriltag_images directory
-        tag_image_path = f'file:///home/ubuntu/ros2_ws/src/courier_nav/courier_nav/apriltag_images/tag_{tag_id}.png'
+        # Get the package share directory dynamically
+        try:
+            pkg_share = get_package_share_directory('courier_nav')
+            apriltag_dir = os.path.join(pkg_share, 'apriltag_images')
+        except:
+            # Fallback: use the source directory
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            apriltag_dir = os.path.join(current_dir, 'apriltag_images')
+        
+        tag_image_path = f'file://{apriltag_dir}/tag_{tag_id}.png'
         
         return f'''<?xml version="1.0"?>
 <sdf version="1.8">
