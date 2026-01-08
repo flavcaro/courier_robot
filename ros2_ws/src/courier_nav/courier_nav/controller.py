@@ -17,6 +17,7 @@ from .behaviors.navigation import RotateToTarget, MoveToTarget, GetNextWaypoint
 from .behaviors.mission import CollectObject, DeliverObject, PlanReturnPath
 from .behaviors.conditions import IsPathComplete
 from .behaviors.obstacle import HandleObstacle
+from .behaviors.battery import CheckBattery, ChargeBattery
 
 
 class BehaviorTreeController(Node):
@@ -33,6 +34,9 @@ class BehaviorTreeController(Node):
         # Mission parameters
         self.start_cell = (0, 0)
         self.goal_cell = (4, 2)
+        
+        # === Battery State ===
+        self.battery_level = 100.0
         
         # === Robot State (in ODOM frame) ===
         self.robot_x = 0.0
@@ -94,6 +98,7 @@ class BehaviorTreeController(Node):
         self.get_logger().info('='*50)
         self.get_logger().info('COURIER ROBOT - BEHAVIOR TREE CONTROLLER')
         self.get_logger().info(f'Mission: Start {self.start_cell} -> Pickup {self.goal_cell} -> Return {self.start_cell}')
+        self.get_logger().info(f'🔋 Battery: {self.battery_level:.0f}%')
         self.get_logger().info('='*50)
 
     def create_behavior_tree(self):
@@ -162,14 +167,26 @@ class BehaviorTreeController(Node):
     
     def create_navigate_one_cell(self):
         """
-        Navigate to one cell: get waypoint → rotate → move.
+        Navigate to one cell with battery management:
+        - Check battery level
+        - If low, charge
+        - Otherwise: get waypoint → rotate → move
+        
         Returns FAILURE when path is empty (to exit repeat loop).
         Returns SUCCESS when cell reached.
         Returns FAILURE on obstacle (retry will replan).
         """
-        # Sequence with memory: get waypoint → rotate → move
-        nav_sequence = py_trees.composites.Sequence(name="Navigate One Cell", memory=True)
+        # Main sequence: check battery → navigate
+        nav_with_battery = py_trees.composites.Sequence(name="Navigate One Cell", memory=True)
         
+        # Battery management: check → if low, charge
+        battery_check = py_trees.composites.Selector(name="Battery Management", memory=False)
+        check_battery = CheckBattery(name="Check Battery")
+        charge_battery = ChargeBattery(name="Charge Battery")
+        battery_check.add_children([check_battery, charge_battery])
+        
+        # Navigation sequence: get waypoint → rotate → move
+        nav_sequence = py_trees.composites.Sequence(name="Navigate", memory=True)
         get_waypoint = GetNextWaypoint(name="Get Next Waypoint")
         rotate = RotateToTarget(name="Rotate To Target")  
         move = MoveToTarget(name="Move To Target")
@@ -180,7 +197,10 @@ class BehaviorTreeController(Node):
         
         nav_sequence.add_children([get_waypoint, rotate, move_with_fallback])
         
-        return nav_sequence
+        # Combine battery check with navigation
+        nav_with_battery.add_children([battery_check, nav_sequence])
+        
+        return nav_with_battery
 
     def start_mission(self):
         """Calculate initial path and start behavior tree."""

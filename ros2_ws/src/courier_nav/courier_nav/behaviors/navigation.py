@@ -126,7 +126,11 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         # Check if reached
         if distance < node.position_tolerance:
             node.stop_robot()
-            node.get_logger().info(f'REACHED Cell{current_target}!')
+            # Decrement battery by 10% for each cell traversed
+            node.battery_level -= 10.0
+            if node.battery_level < 0:
+                node.battery_level = 0.0
+            node.get_logger().info(f'REACHED Cell{current_target}! 🔋 Battery: {node.battery_level:.0f}%')
             return py_trees.common.Status.SUCCESS
         
         # Check drift - if drifted too much, fail to trigger re-rotation
