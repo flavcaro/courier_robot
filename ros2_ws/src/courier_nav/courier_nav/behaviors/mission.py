@@ -142,3 +142,38 @@ class PlanReturnPath(py_trees.behaviour.Behaviour):
         else:
             node.get_logger().error('NO RETURN PATH FOUND!')
             return py_trees.common.Status.FAILURE
+
+
+class PlanPath(py_trees.behaviour.Behaviour):
+    """Plan BFS path from start to goal."""
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.blackboard = self.attach_blackboard_client(name=self.name)
+        self.blackboard.register_key(key="node", access=common.Access.READ)
+        self.blackboard.register_key(key="path_queue", access=common.Access.WRITE)
+        self.blackboard.register_key(key="returning_home", access=common.Access.WRITE)
+
+    def update(self):
+        """Calculate path from start cell to goal cell."""
+        node = self.blackboard.get("node")
+
+        node.get_logger().info('='*50)
+        node.get_logger().info('PLANNING PATH FROM START TO GOAL')
+        node.get_logger().info('='*50)
+
+        node.get_logger().info(f'Start: {node.start_cell} -> Goal: {node.goal_cell}')
+
+        path = node.bfs_path(node.start_cell, node.goal_cell)
+
+        if path:
+            self.blackboard.set("path_queue", deque(path))
+            self.blackboard.set("returning_home", False)
+            node.get_logger().info(f'PATH FOUND with {len(path)} waypoints')
+            for i, cell in enumerate(path):
+                wx, wy = node.cell_to_world(cell[0], cell[1])
+                node.get_logger().info(f'  {i+1}. Cell{cell} -> ({wx:.2f}, {wy:.2f})')
+            return py_trees.common.Status.SUCCESS
+        else:
+            node.get_logger().error('NO PATH FOUND!')
+            return py_trees.common.Status.FAILURE

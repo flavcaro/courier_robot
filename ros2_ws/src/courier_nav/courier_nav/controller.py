@@ -14,7 +14,7 @@ import py_trees
 from py_trees import common
 
 from .behaviors.navigation import RotateToTarget, MoveToTarget, GetNextWaypoint
-from .behaviors.mission import CollectObject, DeliverObject, PlanReturnPath
+from .behaviors.mission import CollectObject, DeliverObject, PlanReturnPath, PlanPath
 from .behaviors.conditions import IsPathComplete
 from .behaviors.obstacle import HandleObstacle
 from .behaviors.battery import CheckBattery, ChargeBattery
@@ -117,6 +117,9 @@ class BehaviorTreeController(Node):
         # Root sequence - execute mission steps in order
         root = py_trees.composites.Sequence(name="Mission", memory=True)
         
+        # === PHASE 0: Plan initial path ===
+        plan_path = PlanPath(name="Plan Path")
+
         # === PHASE 1: Navigate to pickup ===
         nav_to_pickup = py_trees.decorators.FailureIsSuccess(
             name="Nav To Pickup Complete",
@@ -156,6 +159,7 @@ class BehaviorTreeController(Node):
         
         # Assemble tree
         root.add_children([
+            plan_path,
             nav_to_pickup,
             collect,
             plan_return,
@@ -208,25 +212,12 @@ class BehaviorTreeController(Node):
         
         current_cell = self.world_to_cell(self.robot_x, self.robot_y)
         self.get_logger().info(f'Robot at ({self.robot_x:.2f}, {self.robot_y:.2f}) = cell {current_cell}')
-        
-        # Calculate BFS path
-        path = self.bfs_path(current_cell, self.goal_cell)
-        
-        if path:
-            self.blackboard.set("path_queue", deque(path))
-            self.get_logger().info(f'PATH FOUND with {len(path)} waypoints')
-            for i, cell in enumerate(path):
-                wx, wy = self.cell_to_world(cell[0], cell[1])
-                self.get_logger().debug(f'   {i+1}. Cell{cell} -> World({wx:.2f}, {wy:.2f})')
-            
-            # Create and setup behavior tree
-            self.tree = self.create_behavior_tree()
-            self.tree.setup_with_descendants()
-            
-            self.get_logger().info('✅ Behavior tree created and initialized')
-            self.get_logger().info('\n' + py_trees.display.unicode_tree(root=self.tree, show_status=True))
-        else:
-            self.get_logger().error('NO PATH FOUND!')
+        # Create and setup behavior tree; planning is handled by `PlanPath`
+        self.tree = self.create_behavior_tree()
+        self.tree.setup_with_descendants()
+
+        self.get_logger().info('✅ Behavior tree created and initialized')
+        self.get_logger().info('\n' + py_trees.display.unicode_tree(root=self.tree, show_status=True))
     
     def tick_tree(self):
         """Tick the behavior tree at 20Hz."""
