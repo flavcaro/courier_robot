@@ -26,39 +26,43 @@ class RotateToTarget(py_trees.behaviour.Behaviour):
         node = self.blackboard.get("node")
         target_yaw = self.blackboard.get("target_yaw")
         rotation_start = self.blackboard.get("rotation_start_time")
-        
+        # Guard: ensure we have a valid target
+        if target_yaw is None:
+            return py_trees.common.Status.FAILURE
+
+        # Compute shortest angle error
         angle_error = node.normalize_angle(target_yaw - node.robot_yaw)
-        rotation_elapsed = (node.get_clock().now() - rotation_start).nanoseconds / 1e9
-        
+
         node.get_logger().debug(
             f'ROTATING: target={math.degrees(target_yaw):.1f}° '
             f'current={math.degrees(node.robot_yaw):.1f}° '
-            f'error={math.degrees(angle_error):.1f}° '
-            f'time={rotation_elapsed:.2f}s'
+            f'error={math.degrees(angle_error):.1f}°'
         )
-        
-        # Check if rotation complete (minimum time + angle tolerance)
-        min_rotation_time = 0.2
-        if abs(angle_error) < node.angle_tolerance and rotation_elapsed > min_rotation_time:
+
+        # If within tolerance, stop and succeed
+        if abs(angle_error) < node.angle_tolerance:
             node.stop_robot()
             node.get_logger().info(f'ROTATION DONE! Yaw={math.degrees(node.robot_yaw):.1f}°')
-            
+
             # Check LIDAR before moving
             if node.front_distance < node.obstacle_threshold:
                 node.get_logger().warn(f'BLOCKED AHEAD! Distance={node.front_distance:.2f}m')
-                return py_trees.common.Status.FAILURE  # Trigger obstacle handling
-            
+                return py_trees.common.Status.FAILURE
+
             return py_trees.common.Status.SUCCESS
-        
-        # Continue rotating
+
+        # Proportional angular controller (smooth, respects `rotation_speed` limit)
+        k_p = 1.6
+        ang_cmd = max(-node.rotation_speed, min(node.rotation_speed, k_p * angle_error))
+
+        # Gentle slow-down when close to target angle
+        if abs(angle_error) < 0.25:
+            ang_cmd *= 0.5
+
         cmd = Twist()
         cmd.linear.x = 0.0
-        cmd.angular.z = node.rotation_speed if angle_error > 0 else -node.rotation_speed
-        
-        # Slow down when close
-        if abs(angle_error) < 0.2:
-            cmd.angular.z *= 0.5
-        
+        cmd.angular.z = ang_cmd
+
         node.cmd_vel_pub.publish(cmd)
         return py_trees.common.Status.RUNNING
 
@@ -134,8 +138,14 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             return py_trees.common.Status.SUCCESS
         
         # Check drift - if drifted too much, fail to trigger re-rotation
+        # Ensure target_yaw is valid before checking drift
+        if target_yaw is None:
+            node.get_logger().debug('No target_yaw while moving - failing to trigger rotation')
+            node.stop_robot()
+            return py_trees.common.Status.FAILURE
+
         angle_error = node.normalize_angle(target_yaw - node.robot_yaw)
-        if abs(angle_error) > 0.15:  # ~8.5 degrees
+        if abs(angle_error) > 0.12:  # ~6.9 degrees, tighter drift check
             node.get_logger().debug('DRIFT detected - need realignment')
             node.stop_robot()
             return py_trees.common.Status.FAILURE
@@ -215,9 +225,154 @@ class GetNextWaypoint(py_trees.behaviour.Behaviour):
             else:
                 target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
         
+        # Normalize yaw to avoid wrap-around inconsistencies
+        target_yaw = node.normalize_angle(target_yaw)
         self.blackboard.set("target_yaw", target_yaw)
         
         node.get_logger().debug(f'TARGET: Cell{current_target} = ({target_x:.2f}, {target_y:.2f})')
         node.get_logger().info(f'ROTATE TO: {math.degrees(target_yaw):.0f} deg')
         
         return py_trees.common.Status.SUCCESS
+
+
+class CenterOnCell(py_trees.behaviour.Behaviour):
+    """Fine centering behavior: perform small corrective moves to align robot to cell center."""
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.blackboard = self.attach_blackboard_client(name=self.name)
+        self.blackboard.register_key(key="node", access=common.Access.READ)
+        self.blackboard.register_key(key="current_target", access=common.Access.READ)
+        self.blackboard.register_key(key="target_world_x", access=common.Access.READ)
+        self.blackboard.register_key(key="target_world_y", access=common.Access.READ)
+        # For chaining: peek next waypoint and set target yaw for rotation stage
+        self.blackboard.register_key(key="path_queue", access=common.Access.READ)
+        self.blackboard.register_key(key="target_yaw", access=common.Access.WRITE)
+        self.start_time = None
+
+    def initialise(self):
+        node = self.blackboard.get("node")
+        self.start_time = node.get_clock().now()
+
+    def update(self):
+        node = self.blackboard.get("node")
+
+        target_x = self.blackboard.get("target_world_x")
+        target_y = self.blackboard.get("target_world_y")
+        current_target = self.blackboard.get("current_target")
+
+        if target_x is None or target_y is None or current_target is None:
+            return py_trees.common.Status.FAILURE
+
+        # Compute error in world frame
+        ex = target_x - node.robot_x
+        ey = target_y - node.robot_y
+
+        # Transform to robot frame
+        cy = math.cos(node.robot_yaw)
+        sy = math.sin(node.robot_yaw)
+        x_r =  cy * ex + sy * ey
+        y_r = -sy * ex + cy * ey
+
+        distance = math.hypot(ex, ey)
+        center_tolerance = 0.03  # 3 cm tight centering
+
+        # Timeout to avoid blocking forever
+        elapsed = (node.get_clock().now() - self.start_time).nanoseconds / 1e9
+        max_time = 2.5
+
+        if abs(x_r) < center_tolerance and abs(y_r) < center_tolerance:
+            # If centered, set the next target yaw (if a next waypoint exists)
+            def _set_next_target_yaw():
+                path_queue = self.blackboard.get("path_queue")
+                if not path_queue:
+                    return
+                try:
+                    next_target = path_queue[0]
+                except Exception:
+                    return
+
+                nr, nc = next_target
+                nx, ny = node.cell_to_world(nr, nc)
+
+                try:
+                    current_cell = node.world_to_cell(node.robot_x, node.robot_y)
+                except Exception:
+                    current_cell = None
+
+                dx = nx - node.robot_x
+                dy = ny - node.robot_y
+
+                if current_cell is not None:
+                    crow, ccol = current_cell
+                    drow = nr - crow
+                    dcol = nc - ccol
+
+                    if dcol != 0:
+                        target_yaw = 0.0 if dcol > 0 else math.pi
+                    elif drow != 0:
+                        target_yaw = math.pi / 2 if drow > 0 else -math.pi / 2
+                    else:
+                        if abs(dx) > abs(dy):
+                            target_yaw = 0.0 if dx > 0 else math.pi
+                        else:
+                            target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
+                else:
+                    if abs(dx) > abs(dy):
+                        target_yaw = 0.0 if dx > 0 else math.pi
+                    else:
+                        target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
+
+                # Normalize before writing to blackboard
+                target_yaw = node.normalize_angle(target_yaw)
+                self.blackboard.set("target_yaw", target_yaw)
+                node.get_logger().debug(f'CENTER: setting next target yaw {math.degrees(target_yaw):.0f} deg for Cell{next_target}')
+
+            _set_next_target_yaw()
+            node.stop_robot()
+            node.get_logger().info(f'CENTERED Cell{current_target} (err={distance:.3f}m)')
+            return py_trees.common.Status.SUCCESS
+
+        if elapsed > max_time:
+            # On timeout also attempt to set next yaw so rotation stage can proceed
+            try:
+                path_queue = self.blackboard.get("path_queue")
+                if path_queue:
+                    next_target = path_queue[0]
+                    nr, nc = next_target
+                    nx, ny = node.cell_to_world(nr, nc)
+                    dx = nx - node.robot_x
+                    dy = ny - node.robot_y
+                    if abs(dx) > abs(dy):
+                        target_yaw = 0.0 if dx > 0 else math.pi
+                    else:
+                        target_yaw = math.pi / 2 if dy > 0 else -math.pi / 2
+                    target_yaw = node.normalize_angle(target_yaw)
+                    self.blackboard.set("target_yaw", target_yaw)
+                    node.get_logger().debug(f'CENTER timeout: setting next target yaw {math.degrees(target_yaw):.0f} deg for Cell{next_target}')
+            except Exception:
+                pass
+
+            node.stop_robot()
+            node.get_logger().warn(f'Centering timeout for Cell{current_target} (err={distance:.3f}m)')
+            return py_trees.common.Status.SUCCESS
+
+        # Simple proportional controller: small angular correction and forward speed
+        k_linear = 0.6
+        k_angular = 1.2
+
+        # Desired heading in robot frame
+        desired_heading = math.atan2(y_r, x_r)
+        linear_speed = max(-0.08, min(0.08, k_linear * x_r))
+        angular_speed = max(-0.6, min(0.6, k_angular * desired_heading))
+
+        # If error is mostly lateral, prioritize rotation then small forward steps
+        if abs(desired_heading) > 0.35:
+            linear_speed = 0.02
+
+        cmd = Twist()
+        cmd.linear.x = linear_speed
+        cmd.angular.z = angular_speed
+        node.cmd_vel_pub.publish(cmd)
+
+        return py_trees.common.Status.RUNNING

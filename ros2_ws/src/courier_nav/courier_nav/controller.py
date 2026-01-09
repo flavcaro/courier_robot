@@ -13,7 +13,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 import py_trees
 from py_trees import common
 
-from .behaviors.navigation import RotateToTarget, MoveToTarget, GetNextWaypoint
+from .behaviors.navigation import RotateToTarget, MoveToTarget, GetNextWaypoint, CenterOnCell
 from .behaviors.mission import CollectObject, DeliverObject, PlanReturnPath, PlanPath
 from .behaviors.conditions import IsPathComplete
 from .behaviors.obstacle import HandleObstacle
@@ -194,12 +194,13 @@ class BehaviorTreeController(Node):
         get_waypoint = GetNextWaypoint(name="Get Next Waypoint")
         rotate = RotateToTarget(name="Rotate To Target")  
         move = MoveToTarget(name="Move To Target")
+        center = CenterOnCell(name="Center On Cell")
         
         # Add obstacle handling as a fallback
         move_with_fallback = py_trees.composites.Selector(name="Move Or Handle", memory=False)
         move_with_fallback.add_children([move, HandleObstacle(name="Handle Obstacle")])
         
-        nav_sequence.add_children([get_waypoint, rotate, move_with_fallback])
+        nav_sequence.add_children([get_waypoint, rotate, move_with_fallback, center])
         
         # Combine battery check with navigation
         nav_with_battery.add_children([battery_check, nav_sequence])
