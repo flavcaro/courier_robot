@@ -202,12 +202,12 @@ class WorldSpawner(Node):
         
         grid_length = self.grid_size * self.cell_size
         
-        # 1. FLOOR TILES
+        # 1. FLOOR TILES - High contrast checkerboard
         self.get_logger().info('Queueing floor tiles...')
         for i in range(self.grid_size):
             for j in range(self.grid_size):
                 is_white = (i + j) % 2 == 0
-                color = (0.9, 0.9, 0.9) if is_white else (0.6, 0.6, 0.6)
+                color = (1.0, 1.0, 1.0) if is_white else (0.4, 0.4, 0.4)  # Increased contrast
                 x = i * self.cell_size + self.cell_size / 2
                 y = j * self.cell_size + self.cell_size / 2
                 
@@ -215,44 +215,44 @@ class WorldSpawner(Node):
                 task = self.spawn_sdf(f'floor_{i}_{j}', sdf, x, y, -0.005)
                 self.spawn_queue.append(task)
         
-        # 2. GRID LINES
+        # 2. GRID LINES - Muted gray for professional appearance
         self.get_logger().info('Queueing grid lines...')
         for i in range(self.grid_size + 1):
-            sdf_h = self.get_box_sdf(grid_length, 0.02, 0.01, 0, 0, 0)
+            sdf_h = self.get_box_sdf(grid_length, 0.02, 0.01, 0.35, 0.35, 0.35)  # Muted gray
             task_h = self.spawn_sdf(f'hline_{i}', sdf_h, grid_length/2, i * self.cell_size, 0.01)
             self.spawn_queue.append(task_h)
             
-            sdf_v = self.get_box_sdf(0.02, grid_length, 0.01, 0, 0, 0)
+            sdf_v = self.get_box_sdf(0.02, grid_length, 0.01, 0.35, 0.35, 0.35)  # Muted gray
             task_v = self.spawn_sdf(f'vline_{i}', sdf_v, i * self.cell_size, grid_length/2, 0.01)
             self.spawn_queue.append(task_v)
         
-        # 3. BOUNDARY WALLS
+        # 3. BOUNDARY WALLS - Professional blue-gray
         self.get_logger().info('Queueing boundary walls...')
-        wall_height = 0.4
+        wall_height = 0.6  # Taller walls
         wall_thickness = 0.1
-        sdf = self.get_box_sdf(grid_length + 0.2, wall_thickness, wall_height, 0.2, 0.2, 0.8, True)
+        sdf = self.get_box_sdf(grid_length + 0.2, wall_thickness, wall_height, 0.4, 0.42, 0.55, True)  # Professional blue-gray
         
         self.spawn_queue.append(self.spawn_sdf('wall_south', sdf, grid_length/2, -wall_thickness/2, wall_height/2))
         self.spawn_queue.append(self.spawn_sdf('wall_north', sdf, grid_length/2, grid_length + wall_thickness/2, wall_height/2))
         
-        sdf = self.get_box_sdf(wall_thickness, grid_length + 0.2, wall_height, 0.2, 0.2, 0.8, True)
+        sdf = self.get_box_sdf(wall_thickness, grid_length + 0.2, wall_height, 0.4, 0.42, 0.55, True)  # Professional blue-gray
         self.spawn_queue.append(self.spawn_sdf('wall_west', sdf, -wall_thickness/2, grid_length/2, wall_height/2))
         self.spawn_queue.append(self.spawn_sdf('wall_east', sdf, grid_length + wall_thickness/2, grid_length/2, wall_height/2))
         
-        # 4. OBSTACLES
+        # 4. OBSTACLES - Muted red-brown, professional
         self.get_logger().info('Queueing obstacles...')
-        obstacle_sdf = self.get_box_sdf(0.9, 0.9, 0.5, 0.8, 0.1, 0.1, True)
+        obstacle_sdf = self.get_box_sdf(0.9, 0.9, 0.65, 0.85, 0.2, 0.15, True)  # Muted red-brown, taller
         
         for (row, col) in self.obstacles:
             x = col * self.cell_size + self.cell_size / 2
             y = row * self.cell_size + self.cell_size / 2
             
-            self.spawn_queue.append(self.spawn_sdf(f'obstacle_{row}_{col}', obstacle_sdf, x, y, 0.25))
+            self.spawn_queue.append(self.spawn_sdf(f'obstacle_{row}_{col}', obstacle_sdf, x, y, 0.325))
             
-            # X markers
-            x_sdf = self.get_box_sdf(0.6, 0.08, 0.05, 1.0, 0.5, 0.0)
-            self.spawn_queue.append(self.spawn_sdf(f'x1_{row}_{col}', x_sdf, x, y, 0.55, 0.785))
-            self.spawn_queue.append(self.spawn_sdf(f'x2_{row}_{col}', x_sdf, x, y, 0.55, -0.785))
+            # X markers - Professional orange-brown
+            x_sdf = self.get_box_sdf(0.6, 0.08, 0.05, 0.8, 0.4, 0.1)  # Professional orange-brown
+            self.spawn_queue.append(self.spawn_sdf(f'x1_{row}_{col}', x_sdf, x, y, 0.58, 0.785))
+            self.spawn_queue.append(self.spawn_sdf(f'x2_{row}_{col}', x_sdf, x, y, 0.58, -0.785))
         
         # 5. APRILTAG MARKERS
         self.get_logger().info('Queueing AprilTag markers...')
@@ -313,14 +313,14 @@ class WorldSpawner(Node):
         self.get_logger().info('Queueing markers...')
         start_x = self.start_cell[1] * self.cell_size + self.cell_size / 2
         start_y = self.start_cell[0] * self.cell_size + self.cell_size / 2
-        start_sdf = self.get_cylinder_sdf(0.25, 0.02, 0.0, 0.8, 0.0)
-        self.spawn_queue.append(self.spawn_sdf('start_marker', start_sdf, start_x, start_y, 0.01))
+        start_sdf = self.get_cylinder_sdf(0.35, 0.03, 0.0, 0.65, 0.15)  # Larger, professional green
+        self.spawn_queue.append(self.spawn_sdf('start_marker', start_sdf, start_x, start_y, 0.015))
         
         # 7. GOAL MARKER
         goal_x = self.goal_cell[1] * self.cell_size + self.cell_size / 2
         goal_y = self.goal_cell[0] * self.cell_size + self.cell_size / 2
-        goal_sdf = self.get_cylinder_sdf(0.25, 0.02, 0.0, 0.0, 0.8)
-        self.spawn_queue.append(self.spawn_sdf('goal_marker', goal_sdf, goal_x, goal_y, 0.01))
+        goal_sdf = self.get_cylinder_sdf(0.35, 0.03, 0.0, 0.0, 1.0) 
+        self.spawn_queue.append(self.spawn_sdf('goal_marker', goal_sdf, goal_x, goal_y, 0.015))
         
         # === EXECUTE ALL SPAWNS IN PARALLEL ===
         self.get_logger().info(f'Total objects to spawn: {len(self.spawn_queue)}')

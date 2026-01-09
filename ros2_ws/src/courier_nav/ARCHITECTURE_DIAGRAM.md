@@ -113,41 +113,6 @@ Blackboard Keys:
   - returning_home       → mission phase flag
 ```
 
-## Code Size Comparison
-
-```
-Before Refactoring:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 931 lines
-nav2_mission_controller_bt.py
-
-After Refactoring:
-Entry point:
-━━━━━━━━━━━━━━━━━ 35 lines
-nav2_mission_controller_bt.py
-
-Controller:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 495 lines
-controller.py
-
-Behaviors:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 230 lines
-navigation.py
-
-━━━━━━━━━━━━━━━━━━━━━━━━━ 155 lines
-mission.py
-
-━━━━━━━━ 65 lines
-obstacle.py
-
-━━ 20 lines
-conditions.py
-
-Package init:
-━━ 20 lines
-__init__.py
-
-Total: ~1020 lines (slightly more due to module headers)
-```
 
 ## Benefits Summary
 
