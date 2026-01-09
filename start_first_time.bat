@@ -16,15 +16,15 @@ if errorlevel 1 (
 )
 
 :: Check if image already exists
-docker image inspect courier-robot:nav2 >nul 2>&1
+docker image inspect courier-robot:latest >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Docker image 'courier-robot:nav2' not found.
-    echo [INFO] Building custom image with Nav2 pre-installed...
+    echo [INFO] Docker image 'courier-robot:latest' not found.
+    echo [INFO] Building custom image...
     echo.
     echo This may take 10-15 minutes on first run...
     echo.
     
-    docker build -t courier-robot:nav2 .
+    docker build -t courier-robot:latest .
     
     if errorlevel 1 (
         echo.
@@ -36,8 +36,8 @@ if errorlevel 1 (
     echo.
     echo [SUCCESS] Docker image built successfully!
 ) else (
-    echo [INFO] Docker image 'courier-robot:nav2' already exists.
-    echo [INFO] Skipping build. To rebuild, run: docker build -t courier-robot:nav2 .
+    echo [INFO] Docker image 'courier-robot:latest' already exists.
+    echo [INFO] Skipping build. To rebuild, run: docker build -t courier-robot:latest .
 )
 
 echo.
@@ -51,7 +51,7 @@ echo Once inside the container, run:
 echo   cd /home/ubuntu/ros2_ws
 echo   colcon build --symlink-install
 echo   source install/setup.bash
-echo   ./start_nav2.sh
+echo   ./start_mission.sh
 echo.
 echo ============================================
 echo.
@@ -62,7 +62,7 @@ docker run -it --rm ^
     --gpus all ^
     -v "%cd%\ros2_ws:/home/ubuntu/ros2_ws" ^
     --name courier_robot ^
-    courier-robot:nav2
+    courier-robot:latest
 
 echo.
 echo Container stopped.

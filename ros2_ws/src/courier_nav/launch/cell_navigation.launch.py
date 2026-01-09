@@ -1,10 +1,17 @@
 """
-Launch file per navigazione cell-to-cell
-Include:
-- Gazebo simulation
-- World spawner (griglia migliorata)
-- Cell-to-cell controller (no Nav2)
-- AprilTag localizer
+Launch file for cell-to-cell courier robot navigation.
+
+This launch file starts:
+- Gazebo simulation with ROS bridge
+- World spawner (5x5 grid with obstacles)
+- AprilTag localizer for position corrections
+- Behavior Tree mission controller
+
+The robot navigates using:
+- BFS pathfinding algorithm
+- LIDAR obstacle detection
+- AprilTag localization
+- Cell-by-cell centering and rotation
 """
 
 import os
@@ -36,14 +43,14 @@ def generate_launch_description():
                     '--reqtype', 'gz.msgs.EntityFactory',
                     '--reptype', 'gz.msgs.Boolean',
                     '--timeout', '5000',
-                    '--req', 'sdf_filename: "/root/ros2_ws/robot.sdf", name: "courier_robot", pose: {position: {x: 0.5, y: 0.5, z: 0.1}}'
+                    '--req', 'sdf_filename: "/home/ubuntu/ros2_ws/robot.sdf", name: "courier_robot", pose: {position: {x: 0.5, y: 0.5, z: 0.1}}'
                 ],
                 output='screen'
             )
         ]
     )
     
-    # World spawner - spawn griglia migliorata (delayed after robot spawns)
+    # World spawner - spawn grid with obstacles (delayed after robot spawns)
     world_spawner = TimerAction(
         period=8.0,
         actions=[
@@ -59,7 +66,7 @@ def generate_launch_description():
     
     # AprilTag localizer (delayed after world is spawned)
     apriltag_localizer = TimerAction(
-        period=20.0,
+        period=15.0,
         actions=[
             Node(
                 package='courier_nav',
@@ -71,22 +78,22 @@ def generate_launch_description():
         ]
     )
     
-    # Cell-to-Cell navigation controller (delayed to allow sensors to init)
-    navigation_controller = TimerAction(
-        period=22.0,
+    # Behavior Tree mission controller (delayed to allow sensors to init)
+    mission_controller = TimerAction(
+        period=18.0,
         actions=[
             Node(
                 package='courier_nav',
-                executable='nav2_mission_controller_bt',
-                name='behavior_tree_controller',
+                executable='mission_controller',
+                name='mission_controller',
                 output='screen',
                 parameters=[{'use_sim_time': True}]
             )
         ]
     )
     
-    # Static transform: map -> odom (identity, since we use odom as reference)
-    static_tf = TimerAction(
+    # Static transforms for TF tree
+    static_tf_map = TimerAction(
         period=2.0,
         actions=[
             Node(
@@ -98,11 +105,50 @@ def generate_launch_description():
         ]
     )
     
+    static_tf_base = TimerAction(
+        period=2.0,
+        actions=[
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='base_footprint_tf',
+                arguments=['0', '0', '0.1', '0', '0', '0', 'base_link', 'base_footprint']
+            )
+        ]
+    )
+    
+    static_tf_lidar = TimerAction(
+        period=2.0,
+        actions=[
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='lidar_tf',
+                arguments=['0', '0', '0.2', '0', '0', '0', 'base_link', 'lidar_link']
+            )
+        ]
+    )
+    
+    static_tf_camera = TimerAction(
+        period=2.0,
+        actions=[
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='camera_tf',
+                arguments=['0.15', '0', '0.15', '0', '0', '0', 'base_link', 'camera_link']
+            )
+        ]
+    )
+    
     return LaunchDescription([
         sim_launch,
         spawn_robot,
-        static_tf,
+        static_tf_map,
+        static_tf_base,
+        static_tf_lidar,
+        static_tf_camera,
         world_spawner,
         apriltag_localizer,
-        navigation_controller,
+        mission_controller,
     ])

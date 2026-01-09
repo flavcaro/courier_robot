@@ -24,11 +24,11 @@ setup(
     zip_safe=True,
     maintainer='ubuntu',
     maintainer_email='ubuntu@todo.todo',
-    description='Courier navigation with Behavior Tree',
+    description='Courier robot navigation with Behavior Tree - cell-to-cell navigation using BFS pathfinding, LIDAR, and AprilTag localization',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'nav2_mission_controller_bt = courier_nav.nav2_mission_controller_bt:main',
+            'mission_controller = courier_nav.mission_controller:main',
             'spawner = courier_nav.world_spawner:main',
             'apriltag_localizer = courier_nav.apriltag_localizer:main',
         ],

@@ -4,6 +4,7 @@ from .navigation import RotateToTarget, MoveToTarget, GetNextWaypoint
 from .mission import CollectObject, DeliverObject, PlanReturnPath
 from .conditions import IsPathComplete
 from .obstacle import HandleObstacle
+from .battery import CheckBattery, ChargeBattery
 
 __all__ = [
     'RotateToTarget',
@@ -14,4 +15,6 @@ __all__ = [
     'PlanReturnPath',
     'IsPathComplete',
     'HandleObstacle',
+    'CheckBattery',
+    'ChargeBattery',
 ]

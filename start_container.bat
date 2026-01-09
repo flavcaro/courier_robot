@@ -5,9 +5,11 @@ echo ============================================
 echo.
 echo Container will be available at: http://localhost:6080
 echo.
+echo Once inside, run: ./start_mission.sh
+echo.
 
 :: Check if image exists
-docker image inspect courier-robot:nav2 >nul 2>&1
+docker image inspect courier-robot:latest >nul 2>&1
 if errorlevel 1 (
     echo [WARNING] Image not found! Run 'start_first_time.bat' first.
     pause
@@ -19,6 +21,4 @@ docker run -it --rm ^
     --gpus all ^
     -v "%cd%\ros2_ws:/home/ubuntu/ros2_ws" ^
     --name courier_robot ^
-    courier-robot:nav2
-
-::docker run -it --rm -p 6080:80 -v "C:\courier_robot\ros2_ws:/home/ubuntu/ros2_ws" --name courier_robot courier-robot:nav2
+    courier-robot:latest
