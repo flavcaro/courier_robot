@@ -14,7 +14,7 @@ import py_trees
 from py_trees import common
 
 from .behaviors.navigation import RotateToTarget, MoveToTarget, GetNextWaypoint, CenterOnCell
-from .behaviors.mission import CollectObject, DeliverObject, PlanReturnPath, PlanPath
+from .behaviors.mission import CollectObject, DeliverObject, PlanReturnPath, PlanPath, AlignWithAprilTag
 from .behaviors.conditions import IsPathComplete
 from .behaviors.obstacle import HandleObstacle
 from .behaviors.battery import CheckBattery, ChargeBattery
@@ -134,8 +134,13 @@ class BehaviorTreeController(Node):
             )
         )
         
-        # === PHASE 2: Collect object ===
+        # === PHASE 2: Precise alignment with AprilTag + Collect object ===
+        align_apriltag = AlignWithAprilTag(name="Align With AprilTag")
         collect = CollectObject(name="Collect Object")
+        
+        # Sequence: align first, then collect
+        pickup_sequence = py_trees.composites.Sequence(name="Precise Pickup", memory=True)
+        pickup_sequence.add_children([align_apriltag, collect])
         
         # === PHASE 3: Plan return ===
         plan_return = PlanReturnPath(name="Plan Return Path")
@@ -161,7 +166,7 @@ class BehaviorTreeController(Node):
         root.add_children([
             plan_path,
             nav_to_pickup,
-            collect,
+            pickup_sequence,  # Now includes AprilTag alignment + collect
             plan_return,
             nav_to_home,
             deliver
