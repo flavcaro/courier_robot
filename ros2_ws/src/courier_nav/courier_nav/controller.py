@@ -144,8 +144,11 @@ class BehaviorTreeController(Node):
         pickup_sequence = py_trees.composites.Sequence(name="Precise Pickup", memory=True)
         pickup_sequence.add_children([align_apriltag, collect])
         
-        # === PHASE 3: Plan return ===
+        # === PHASE 3: Plan return (before recentering so we know where to orient) ===
         plan_return = PlanReturnPath(name="Plan Return Path")
+        
+        # === PHASE 3.5: Recenter after pickup (navigation loop will handle orientation) ===
+        recenter_after_pickup = CenterOnCell(name="Recenter After Pickup")
         
         # === PHASE 4: Navigate home ===
         nav_to_home = py_trees.decorators.FailureIsSuccess(
@@ -168,8 +171,9 @@ class BehaviorTreeController(Node):
         root.add_children([
             plan_path,
             nav_to_pickup,
-            pickup_sequence,  # Now includes AprilTag alignment + collect
-            plan_return,
+            pickup_sequence,  # AprilTag alignment + collect
+            plan_return,      # Plan return path
+            recenter_after_pickup,  # Recenter (navigation loop handles orientation)
             nav_to_home,
             deliver
         ])

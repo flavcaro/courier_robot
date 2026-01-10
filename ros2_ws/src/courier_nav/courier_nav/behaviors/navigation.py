@@ -264,7 +264,7 @@ class CenterOnCell(py_trees.behaviour.Behaviour):
         - If both sides see walls at reasonable distance, use difference to center
         - Only apply when robot is aligned with grid (yaw ~0, 90, 180, 270 deg)
         """
-        # TEMPORARILY DISABLED for debugging
+        # DISABLED: lateral correction was causing issues
         return 0.0, 0.0
         
         if not hasattr(node, 'lidar_ranges') or node.lidar_ranges is None:
@@ -344,11 +344,11 @@ class CenterOnCell(py_trees.behaviour.Behaviour):
         y_r = -sy * ex + cy * ey
 
         distance = math.hypot(ex, ey)
-        center_tolerance = 0.03  # 3 cm tight centering
+        center_tolerance = 0.04  # 4 cm centering tolerance
 
         # Timeout to avoid blocking forever
         elapsed = (node.get_clock().now() - self.start_time).nanoseconds / 1e9
-        max_time = 2.5
+        max_time = 4.0
 
         if abs(x_r) < center_tolerance and abs(y_r) < center_tolerance:
             # If centered, set the next target yaw (if a next waypoint exists)
