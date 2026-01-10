@@ -55,11 +55,22 @@ echo "✅ Clean complete!"
 
 # Build workspace
 echo "🔨 Building workspace..."
-colcon build --symlink-install
+colcon build
 
 if [ $? -ne 0 ]; then
     echo "❌ Build failed! Check the errors above."
     exit 1
+fi
+
+# Copy AprilTag images (fix symlink issue for Gazebo)
+echo "📋 Copying AprilTag images for Gazebo..."
+APRILTAG_SRC="$ROS2_WS/src/courier_nav/courier_nav/apriltag_images"
+APRILTAG_INSTALL="$ROS2_WS/install/courier_nav/share/courier_nav/apriltag_images"
+if [ -d "$APRILTAG_SRC" ] && [ -d "$APRILTAG_INSTALL" ]; then
+    # Remove symlinks and copy real files
+    rm -f "$APRILTAG_INSTALL"/*.png
+    cp "$APRILTAG_SRC"/*.png "$APRILTAG_INSTALL"/
+    echo "✅ AprilTag images copied ($(ls $APRILTAG_INSTALL/*.png 2>/dev/null | wc -l) files)"
 fi
 
 source install/setup.bash

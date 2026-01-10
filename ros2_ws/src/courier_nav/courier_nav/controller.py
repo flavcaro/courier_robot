@@ -45,6 +45,7 @@ class BehaviorTreeController(Node):
         
         # === AprilTag Localization ===
         self.last_apriltag_pose = None
+        self.last_apriltag_id = None  # Track which tag was detected
         self.apriltag_correction_weight = 0.3  # 30% tag, 70% odometry
         self.last_apriltag_time = None
         
@@ -56,6 +57,7 @@ class BehaviorTreeController(Node):
         
         # === LIDAR Parameters ===
         self.front_distance = 5.0
+        self.lidar_ranges = None  # Store full LIDAR scan for lateral correction
         self.obstacle_threshold = 0.50
         self.lidar_received = False
         
@@ -135,7 +137,7 @@ class BehaviorTreeController(Node):
         )
         
         # === PHASE 2: Precise alignment with AprilTag + Collect object ===
-        align_apriltag = AlignWithAprilTag(name="Align With AprilTag")
+        align_apriltag = AlignWithAprilTag(name="Align With AprilTag #4", target_tag_id=4)
         collect = CollectObject(name="Collect Object")
         
         # Sequence: align first, then collect
@@ -309,6 +311,16 @@ class BehaviorTreeController(Node):
 
     def apriltag_callback(self, msg):
         """Apply AprilTag localization correction to reduce odometry drift."""
+        # Extract tag ID from frame_id
+        self.last_apriltag_time = self.get_clock().now()
+        try:
+            if "apriltag_" in msg.header.frame_id:
+                self.last_apriltag_id = int(msg.header.frame_id.split('_')[-1])
+            else:
+                self.last_apriltag_id = None
+        except:
+            self.last_apriltag_id = None
+        
         # Extract pose from AprilTag detection
         tag_x = msg.pose.pose.position.x
         tag_y = msg.pose.pose.position.y
@@ -317,6 +329,9 @@ class BehaviorTreeController(Node):
         qz = msg.pose.pose.orientation.z
         qw = msg.pose.pose.orientation.w
         tag_yaw = math.atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
+        
+        # Store for AlignWithAprilTag behavior
+        self.last_apriltag_pose = (tag_x, tag_y, tag_yaw)
         
         # Get covariance (confidence based on distance)
         cov_x = msg.pose.covariance[0]  # x variance
@@ -367,6 +382,9 @@ class BehaviorTreeController(Node):
         num_readings = len(msg.ranges)
         angle_increment = msg.angle_increment
         angle_min = msg.angle_min
+        
+        # Store full LIDAR scan for lateral centering
+        self.lidar_ranges = msg.ranges
         
         # Front sector: -30° to +30°
         start_idx = int((-0.52 - angle_min) / angle_increment)

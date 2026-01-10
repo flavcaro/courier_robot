@@ -236,7 +236,7 @@ class GetNextWaypoint(py_trees.behaviour.Behaviour):
 
 
 class CenterOnCell(py_trees.behaviour.Behaviour):
-    """Fine centering behavior: perform small corrective moves to align robot to cell center."""
+    """Fine centering behavior: uses ODOMETRY + LIDAR for better accuracy."""
 
     def __init__(self, name: str):
         super().__init__(name)
@@ -254,6 +254,68 @@ class CenterOnCell(py_trees.behaviour.Behaviour):
         node = self.blackboard.get("node")
         self.start_time = node.get_clock().now()
 
+    def get_lidar_correction(self, node):
+        """
+        Use LIDAR to estimate lateral offset from cell center.
+        Returns (dx_correction, dy_correction) in world frame, or (0, 0) if not applicable.
+        
+        Strategy: 
+        - Check left/right LIDAR readings (perpendicular to robot forward)
+        - If both sides see walls at reasonable distance, use difference to center
+        - Only apply when robot is aligned with grid (yaw ~0, 90, 180, 270 deg)
+        """
+        # TEMPORARILY DISABLED for debugging
+        return 0.0, 0.0
+        
+        if not hasattr(node, 'lidar_ranges') or node.lidar_ranges is None:
+            return 0.0, 0.0
+        
+        # Get LIDAR data (assuming 360 rays, 0=front, 90=left, 180=back, 270=right)
+        ranges = node.lidar_ranges
+        num_rays = len(ranges)
+        if num_rays == 0:
+            return 0.0, 0.0
+        
+        # Calculate indices for left and right (±90° from front)
+        left_idx = num_rays // 4  # 90°
+        right_idx = 3 * num_rays // 4  # 270°
+        
+        left_dist = ranges[left_idx] if left_idx < len(ranges) else float('inf')
+        right_dist = ranges[right_idx] if right_idx < len(ranges) else float('inf')
+        
+        # Only use LIDAR correction if both sides see walls within cell distance (< 1.5m)
+        max_wall_dist = 1.5
+        if left_dist > max_wall_dist or right_dist > max_wall_dist:
+            return 0.0, 0.0
+        
+        # Lateral offset: positive means robot is too far right
+        lateral_offset = (right_dist - left_dist) / 2.0
+        
+        # Convert to world frame based on robot orientation
+        # Determine if robot is axis-aligned
+        yaw_deg = math.degrees(node.robot_yaw) % 360
+        
+        # Tolerance for "aligned with grid"
+        align_tol = 15  # degrees
+        
+        dx_corr = 0.0
+        dy_corr = 0.0
+        
+        if abs(yaw_deg) < align_tol or abs(yaw_deg - 360) < align_tol:
+            # Facing +X (East): left is +Y, right is -Y
+            dy_corr = -lateral_offset
+        elif abs(yaw_deg - 90) < align_tol:
+            # Facing +Y (North): left is -X, right is +X
+            dx_corr = lateral_offset
+        elif abs(yaw_deg - 180) < align_tol:
+            # Facing -X (West): left is -Y, right is +Y
+            dy_corr = lateral_offset
+        elif abs(yaw_deg - 270) < align_tol:
+            # Facing -Y (South): left is +X, right is -X
+            dx_corr = -lateral_offset
+        
+        return dx_corr, dy_corr
+
     def update(self):
         node = self.blackboard.get("node")
 
@@ -264,10 +326,17 @@ class CenterOnCell(py_trees.behaviour.Behaviour):
         if target_x is None or target_y is None or current_target is None:
             return py_trees.common.Status.FAILURE
 
-        # Compute error in world frame
-        ex = target_x - node.robot_x
-        ey = target_y - node.robot_y
+        # Compute error in world frame from ODOMETRY
+        ex_odom = target_x - node.robot_x
+        ey_odom = target_y - node.robot_y
 
+        # Get LIDAR-based correction
+        dx_lidar, dy_lidar = self.get_lidar_correction(node)
+        
+        # Combine: use LIDAR to correct lateral offset
+        ex = ex_odom + dx_lidar
+        ey = ey_odom + dy_lidar
+        
         # Transform to robot frame
         cy = math.cos(node.robot_yaw)
         sy = math.sin(node.robot_yaw)

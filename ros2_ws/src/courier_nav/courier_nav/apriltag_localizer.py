@@ -49,7 +49,7 @@ class AprilTagLocalizer(Node):
             2: {'x': 4.5, 'y': 0.02, 'z': 0.15, 'yaw': 1.5708},
             # North wall (y = 4.98-4.99) - tags face SOUTH (-Y)
             3: {'x': 0.5, 'y': 4.98, 'z': 0.15, 'yaw': -1.5708},
-            4: {'x': 2.5, 'y': 4.98, 'z': 0.15, 'yaw': -1.5708},
+            4: {'x': 2.5, 'y': 4.98, 'z': 0.35, 'yaw': -1.5708},  # Raised for better visibility
             5: {'x': 4.5, 'y': 4.98, 'z': 0.15, 'yaw': -1.5708},
             # West wall (x = 0.01-0.02) - tags face EAST (+X)
             6: {'x': 0.02, 'y': 0.5, 'z': 0.15, 'yaw': 0.0},
@@ -147,8 +147,13 @@ class AprilTagLocalizer(Node):
         self._last_debug_img_time = 0.0
         self._debug_img_interval = 0.5  # seconds
         
+        # Diagnostics
+        self._image_count = 0
+        self._last_image_log = 0.0
+        
         self.get_logger().info('AprilTag Localizer started')
         self.get_logger().info(f'Known tags: {list(self.tag_positions.keys())}')
+        self.get_logger().info('Waiting for /camera and /camera_info topics...')
         
     def camera_info_callback(self, msg):
         """Update camera intrinsics from camera info message."""
@@ -171,6 +176,13 @@ class AprilTagLocalizer(Node):
         
     def image_callback(self, msg):
         """Process camera image to detect AprilTags."""
+        # Log image reception periodically
+        self._image_count += 1
+        current_time = self.get_clock().now().nanoseconds / 1e9
+        if current_time - self._last_image_log > 5.0:
+            self.get_logger().info(f'📷 Received {self._image_count} images from /camera (size: {msg.width}x{msg.height})')
+            self._last_image_log = current_time
+            
         if self.camera_matrix is None:
             self.get_logger().warn('No camera_info yet — skipping image processing', throttle_duration_sec=2.0)
             return
@@ -187,6 +199,15 @@ class AprilTagLocalizer(Node):
         
         # Detect AprilTags
         detections = self.detect_tags(gray)
+        
+        # Log detection periodically
+        if current_time - self._last_detection_log > 3.0:
+            if detections:
+                tag_ids = [d['id'] for d in detections]
+                self.get_logger().info(f'✅ Detected {len(detections)} AprilTag(s): {tag_ids}')
+            else:
+                self.get_logger().info('🔍 No AprilTags detected in current frame')
+            self._last_detection_log = current_time
         
         # Process detections silently (no periodic logging)
         if detections:
@@ -380,24 +401,29 @@ class AprilTagLocalizer(Node):
         
         # Sanity check 1: reject poses outside valid grid bounds (0-5m with some margin)
         if x < -0.5 or x > 5.5 or y < -0.5 or y > 5.5:
-            # Silently reject out-of-bounds detections
+            self.get_logger().warn(f'Tag #{tag_id} rejected: out of bounds ({x:.2f}, {y:.2f})', throttle_duration_sec=2.0)
             return
         
-        # Sanity check 2: if we have odometry, reject if pose differs by > 0.5m
-        # Only accept corrections that are already close to current estimate (fine-tuning only)
+        # Sanity check 2: if we have odometry, reject if pose differs by > 1.5m
+        # Relaxed threshold to allow AprilTag-based localization for pickup alignment
         if self.current_odom is not None:
             odom_x = self.current_odom.pose.pose.position.x
             odom_y = self.current_odom.pose.pose.position.y
             diff = np.sqrt((x - odom_x)**2 + (y - odom_y)**2)
             
-            if diff > 0.5:
-                # Silently reject detections that differ too much from odometry
+            if diff > 1.5:
+                self.get_logger().warn(
+                    f'Tag #{tag_id} rejected: too far from odom ({diff:.2f}m > 1.5m) - '
+                    f'Tag pose=({x:.2f},{y:.2f}) vs Odom=({odom_x:.2f},{odom_y:.2f})',
+                    throttle_duration_sec=2.0
+                )
                 return
         
         pose_msg = PoseWithCovarianceStamped()
         pose_msg.header.stamp = stamp
         # This pose is an estimate in the world/map frame
-        pose_msg.header.frame_id = 'map'
+        # Store tag ID in frame_id for behavior tree filtering
+        pose_msg.header.frame_id = f'apriltag_{tag_id}'
         
         pose_msg.pose.pose.position.x = x
         pose_msg.pose.pose.position.y = y
@@ -417,6 +443,14 @@ class AprilTagLocalizer(Node):
         pose_msg.pose.covariance[35] = 0.15 * distance  # yaw uncertainty grows with distance
         
         self.pose_pub.publish(pose_msg)
+        
+        # Log publication for important tags (e.g., pickup target)
+        if tag_id == 4:
+            self.get_logger().info(
+                f'✅ Published AprilTag #{tag_id} pose: ({x:.2f}, {y:.2f}, {np.degrees(yaw):.1f}°) dist={distance:.2f}m',
+                throttle_duration_sec=1.0
+            )
+        
         # Don't broadcast TF here - let the mission controller handle fusion
         # Broadcasting map->odom here causes timestamp conflicts with odometry
     
