@@ -165,7 +165,12 @@ class BehaviorTreeController(Node):
         )
         
         # === PHASE 5: Deliver object ===
+        align_home_apriltag = AlignWithAprilTag(name="Align With AprilTag #0", target_tag_id=0)
         deliver = DeliverObject(name="Deliver Object")
+        
+        # Sequence: align first, then deliver
+        delivery_sequence = py_trees.composites.Sequence(name="Precise Delivery", memory=True)
+        delivery_sequence.add_children([align_home_apriltag, deliver])
         
         # Assemble tree
         root.add_children([
@@ -175,7 +180,7 @@ class BehaviorTreeController(Node):
             plan_return,      # Plan return path
             recenter_after_pickup,  # Recenter (navigation loop handles orientation)
             nav_to_home,
-            deliver
+            delivery_sequence  # AprilTag alignment + deliver
         ])
         
         return root

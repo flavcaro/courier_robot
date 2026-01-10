@@ -261,9 +261,11 @@ class WorldSpawner(Node):
         tag_size = 0.20
         
         # South wall
-        for x_pos in [0.5, 2.5, 4.5]:
+        for i, x_pos in enumerate([0.5, 2.5, 4.5]):
             tag_sdf = self.get_apriltag_sdf(tag_id, tag_size, 0.01, 'XZ')
-            self.spawn_queue.append(self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x_pos, 0.02, 0.15))
+            # Tag #0 (start/home position) is raised higher for better visibility
+            z_height = 0.35 if tag_id == 0 else 0.15
+            self.spawn_queue.append(self.spawn_sdf(f'apriltag_{tag_id}', tag_sdf, x_pos, 0.02, z_height))
             tag_id += 1
         
         # North wall
