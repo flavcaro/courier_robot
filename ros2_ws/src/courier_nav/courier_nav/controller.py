@@ -357,12 +357,13 @@ class BehaviorTreeController(Node):
         self.last_apriltag_pose = (tag_x, tag_y, tag_yaw)
         self.last_apriltag_time = self.get_clock().now()
         
-        # Log each successful correction
+        # Log corrections only every 3 seconds to reduce spam
         self.get_logger().info(
             f'✓ AprilTag correction applied: '
             f'weight={dynamic_weight*100:.1f}% '
             f'pose=({self.robot_x:.2f}, {self.robot_y:.2f}, {math.degrees(self.robot_yaw):.0f}°) '
-            f'cov={avg_covariance:.3f}'
+            f'cov={avg_covariance:.3f}',
+            throttle_duration_sec=3.0
         )
 
     def normalize_angle(self, angle):

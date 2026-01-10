@@ -60,7 +60,7 @@ class WorldSpawner(Node):
             'gz', 'service', '-s', '/world/empty/create',
             '--reqtype', 'gz.msgs.EntityFactory',
             '--reptype', 'gz.msgs.Boolean',
-            '--timeout', '3000',
+            '--timeout', '5000',
             '--req', req
         ]
         
@@ -101,7 +101,7 @@ class WorldSpawner(Node):
     def _run_spawn_cmd(self, cmd, name):
         """Execute a single spawn command (called by executor)."""
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             return result.returncode == 0
         except subprocess.TimeoutExpired:
             self.get_logger().warn(f'Timeout spawning {name}')
@@ -327,7 +327,7 @@ class WorldSpawner(Node):
         
         # === EXECUTE ALL SPAWNS IN PARALLEL ===
         self.get_logger().info(f'Total objects to spawn: {len(self.spawn_queue)}')
-        success, fail = self.execute_spawn_parallel(self.spawn_queue, max_workers=12)
+        success, fail = self.execute_spawn_parallel(self.spawn_queue, max_workers=4)
         
         self.get_logger().info('='*50)
         self.get_logger().info('WORLD SPAWNING COMPLETE')
