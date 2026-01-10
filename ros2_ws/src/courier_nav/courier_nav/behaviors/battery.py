@@ -11,14 +11,20 @@ class CheckBattery(py_trees.behaviour.Behaviour):
         super().__init__(name=name)
         self.blackboard = self.attach_blackboard_client(name=self.name)
         self.blackboard.register_key(key="node", access=py_trees.common.Access.READ)
+        self.low_battery_warned = False
     
     def update(self):
         """Check battery level."""
         node = self.blackboard.get("node")
         
         if node.battery_level <= 20.0:
-            node.get_logger().warn(f'⚠️  LOW BATTERY: {node.battery_level:.0f}%')
+            if not self.low_battery_warned:
+                node.get_logger().warn(f'⚠️  LOW BATTERY: {node.battery_level:.0f}%')
+                self.low_battery_warned = True
             return py_trees.common.Status.FAILURE
+        else:
+            # Reset warning flag when battery is above threshold
+            self.low_battery_warned = False
         
         return py_trees.common.Status.SUCCESS
 
@@ -59,8 +65,8 @@ class ChargeBattery(py_trees.behaviour.Behaviour):
             self.last_increment_time = current_time
             node.get_logger().info(f'🔌 Charging... Battery: {node.battery_level:.0f}%')
             
-            # Check if fully charged (>20% is enough to continue)
-            if node.battery_level > 20.0:
+            # Check if charged to 80%
+            if node.battery_level >= 80.0:
                 total_charge_time = current_time - self.charging_start_time
                 node.get_logger().info('='*50)
                 node.get_logger().info(f'✅ Battery charged! ({total_charge_time:.1f}s)')
