@@ -15,29 +15,91 @@ class RotateToTarget(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="node", access=common.Access.READ)
         self.blackboard.register_key(key="target_yaw", access=common.Access.READ)
         self.blackboard.register_key(key="rotation_start_time", access=common.Access.WRITE)
+        self.blackboard.register_key(key="returning_home", access=common.Access.READ)
         
     def initialise(self):
         """Called when behavior starts."""
         node = self.blackboard.get("node")
         self.blackboard.set("rotation_start_time", node.get_clock().now())
+    
+    def get_lidar_angle_correction(self, node, target_yaw):
+        """
+        Use LIDAR to fine-tune rotation angle based on wall alignment.
+        Returns angle correction in radians (0 if not applicable).
+        """
+        if not hasattr(node, 'lidar_ranges') or node.lidar_ranges is None:
+            return 0.0
+        
+        ranges = node.lidar_ranges
+        num_rays = len(ranges)
+        if num_rays == 0:
+            return 0.0
+        
+        # Only apply when targeting cardinal directions (0°, 90°, 180°, 270°)
+        target_deg = (math.degrees(target_yaw) + 360) % 360
+        
+        # Check if target is cardinal (within 10°)
+        is_cardinal = any(abs(target_deg - card) < 10 for card in [0, 90, 180, 270])
+        if not is_cardinal:
+            return 0.0
+        
+        # Get left (90°) and right (270°) LIDAR readings
+        left_idx = num_rays // 4
+        right_idx = 3 * num_rays // 4
+        
+        left_dist = ranges[left_idx] if left_idx < len(ranges) else float('inf')
+        right_dist = ranges[right_idx] if right_idx < len(ranges) else float('inf')
+        
+        # Only use if both walls visible within reasonable range
+        max_wall_dist = 1.5
+        if left_dist > max_wall_dist or right_dist > max_wall_dist:
+            return 0.0
+        
+        # If walls are not symmetric, robot is not perpendicular to corridor
+        # Positive correction = rotate CCW (left wall closer)
+        # Negative correction = rotate CW (right wall closer)
+        wall_diff = left_dist - right_dist
+        
+        # Convert wall distance difference to angle correction
+        # Assume ~1m corridor width, small angle approximation
+        angle_correction = math.atan2(wall_diff, 1.0) * 0.3  # Damped correction
+        
+        return angle_correction
         
     def update(self):
         """Execute rotation logic."""
         node = self.blackboard.get("node")
         target_yaw = self.blackboard.get("target_yaw")
         rotation_start = self.blackboard.get("rotation_start_time")
+        returning_home = self.blackboard.get("returning_home")
+        
         # Guard: ensure we have a valid target
         if target_yaw is None:
             return py_trees.common.Status.FAILURE
 
-        # Compute shortest angle error
-        angle_error = node.normalize_angle(target_yaw - node.robot_yaw)
+        # Apply LIDAR-based angle correction ONLY during return journey
+        lidar_correction = 0.0
+        if returning_home:
+            lidar_correction = self.get_lidar_angle_correction(node, target_yaw)
+        
+        corrected_target_yaw = node.normalize_angle(target_yaw + lidar_correction)
 
-        node.get_logger().debug(
-            f'ROTATING: target={math.degrees(target_yaw):.1f}° '
-            f'current={math.degrees(node.robot_yaw):.1f}° '
-            f'error={math.degrees(angle_error):.1f}°'
-        )
+        # Compute shortest angle error (using corrected target)
+        angle_error = node.normalize_angle(corrected_target_yaw - node.robot_yaw)
+
+        if returning_home and lidar_correction != 0.0:
+            node.get_logger().debug(
+                f'ROTATING (RETURN): target={math.degrees(target_yaw):.1f}° '
+                f'lidar_corr={math.degrees(lidar_correction):.1f}° '
+                f'current={math.degrees(node.robot_yaw):.1f}° '
+                f'error={math.degrees(angle_error):.1f}°'
+            )
+        else:
+            node.get_logger().debug(
+                f'ROTATING: target={math.degrees(target_yaw):.1f}° '
+                f'current={math.degrees(node.robot_yaw):.1f}° '
+                f'error={math.degrees(angle_error):.1f}°'
+            )
 
         # If within tolerance, stop and succeed
         if abs(angle_error) < node.angle_tolerance:

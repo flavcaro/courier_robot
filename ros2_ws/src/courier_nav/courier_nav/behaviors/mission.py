@@ -50,9 +50,25 @@ class AlignWithAprilTag(py_trees.behaviour.Behaviour):
         # PHASE 1: Search for AprilTag by rotating
         if self.search_phase:
             if has_recent_tag:
-                # Found the TARGET tag! Mission accomplished - just stop
+                # Found the TARGET tag! Reset odometry drift using AprilTag position
                 node.stop_robot()
-                node.get_logger().info(f'✅ AprilTag #{self.target_tag_id} DETECTED! Robot is in position for pickup.')
+                
+                # Get precise position from AprilTag
+                tag_x, tag_y, tag_yaw = node.last_apriltag_pose
+                
+                # HARD RESET: Override odometry with AprilTag position (zero drift)
+                old_x, old_y, old_yaw = node.robot_x, node.robot_y, node.robot_yaw
+                node.robot_x = tag_x
+                node.robot_y = tag_y
+                node.robot_yaw = tag_yaw
+                
+                drift_x = abs(old_x - tag_x)
+                drift_y = abs(old_y - tag_y)
+                drift_angle = abs(math.degrees(node.normalize_angle(old_yaw - tag_yaw)))
+                
+                node.get_logger().info(f'✅ AprilTag #{self.target_tag_id} DETECTED! Robot is in position.')
+                node.get_logger().info(f'🔄 Odometry RESET - Drift corrected: '
+                                     f'Δx={drift_x:.3f}m, Δy={drift_y:.3f}m, Δθ={drift_angle:.1f}°')
                 return py_trees.common.Status.SUCCESS
             
             # Keep rotating slowly to search for tags
