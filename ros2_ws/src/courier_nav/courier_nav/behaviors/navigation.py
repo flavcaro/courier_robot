@@ -130,7 +130,7 @@ class RotateToTarget(py_trees.behaviour.Behaviour):
 
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
-    """Move robot straight to target position (no angular correction during movement)."""
+    """Move robot straight to target position with AprilTag centering corrections."""
     
     def __init__(self, name: str):
         super().__init__(name)
@@ -140,6 +140,82 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(key="target_world_y", access=common.Access.READ)
         self.blackboard.register_key(key="target_yaw", access=common.Access.READ)
         self.blackboard.register_key(key="current_target", access=common.Access.READ)
+        self._last_apriltag_log = 0.0
+        self._movement_start_time = None
+    
+    def initialise(self):
+        """Record when movement starts."""
+        node = self.blackboard.get("node")
+        self._movement_start_time = node.get_clock().now()
+    
+    def get_apriltag_lateral_correction(self, node, target_x, target_y):
+        """
+        Calculate lateral correction from AprilTag detections.
+        Returns angular correction for centering (perpendicular to travel direction).
+        """
+        # Don't apply corrections in the first 0.5 seconds to let robot stabilize
+        if self._movement_start_time is not None:
+            elapsed = (node.get_clock().now() - self._movement_start_time).nanoseconds / 1e9
+            if elapsed < 0.5:
+                return 0.0
+        
+        # Check if we have recent AprilTag data
+        if node.last_apriltag_pose is None or node.last_apriltag_time is None:
+            return 0.0
+        
+        # Only use very recent detections (within 1.0 seconds)
+        tag_age = (node.get_clock().now() - node.last_apriltag_time).nanoseconds / 1e9
+        if tag_age > 1.0:
+            return 0.0
+        
+        tag_x, tag_y, tag_yaw = node.last_apriltag_pose
+        
+        # Calculate position error from AprilTag
+        error_x = tag_x - node.robot_x
+        error_y = tag_y - node.robot_y
+        
+        # Calculate travel direction
+        travel_dx = target_x - node.robot_x
+        travel_dy = target_y - node.robot_y
+        travel_dist = math.sqrt(travel_dx*travel_dx + travel_dy*travel_dy)
+        
+        if travel_dist < 0.05:
+            return 0.0
+        
+        # Normalize travel direction
+        travel_dx /= travel_dist
+        travel_dy /= travel_dist
+        
+        # Calculate lateral error (perpendicular to travel direction)
+        # perpendicular vector is (-travel_dy, travel_dx)
+        lateral_error = error_x * (-travel_dy) + error_y * travel_dx
+        
+        # Only apply correction if lateral error is significant but not too large
+        if abs(lateral_error) < 0.03:  # Less than 3cm, ignore
+            return 0.0
+        
+        if abs(lateral_error) > 0.15:  # More than 15cm, might be noisy
+            return 0.0
+        
+        # Convert lateral error to angular correction with larger lookahead
+        angular_correction = math.atan2(lateral_error, 0.8)  # 0.8m lookahead (more gentle)
+        
+        # Limit maximum correction to avoid instability
+        max_angular_correction = 0.10  # ~5.7 degrees max (reduced from 8.6)
+        angular_correction = max(-max_angular_correction, min(max_angular_correction, angular_correction))
+        
+        # Log corrections periodically
+        current_time = node.get_clock().now().nanoseconds / 1e9
+        if current_time - self._last_apriltag_log > 2.0:
+            if abs(lateral_error) > 0.03:  # Only log significant errors (>3cm)
+                node.get_logger().info(
+                    f'📍 AprilTag centering: lateral_err={lateral_error*100:.1f}cm '
+                    f'ang_corr={math.degrees(angular_correction):.1f}° (age={tag_age:.2f}s)',
+                    throttle_duration_sec=2.0
+                )
+            self._last_apriltag_log = current_time
+        
+        return angular_correction
         
     def update(self):
         """Execute movement logic."""
@@ -199,23 +275,35 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             node.get_logger().info(f'REACHED Cell{current_target}! 🔋 Battery: {node.battery_level:.0f}%')
             return py_trees.common.Status.SUCCESS
         
-        # Check drift - if drifted too much, fail to trigger re-rotation
-        # Ensure target_yaw is valid before checking drift
+        # Check drift - stricter check at start, more tolerant later
         if target_yaw is None:
             node.get_logger().debug('No target_yaw while moving - failing to trigger rotation')
             node.stop_robot()
             return py_trees.common.Status.FAILURE
 
         angle_error = node.normalize_angle(target_yaw - node.robot_yaw)
-        if abs(angle_error) > 0.12:  # ~6.9 degrees, tighter drift check
-            node.get_logger().debug('DRIFT detected - need realignment')
+        
+        # Use stricter drift tolerance at the start (first 1 second)
+        elapsed = (node.get_clock().now() - self._movement_start_time).nanoseconds / 1e9 if self._movement_start_time else 999
+        drift_tolerance = 0.10 if elapsed < 1.0 else 0.18  # ~5.7° first second, then ~10.3°
+        
+        if abs(angle_error) > drift_tolerance:
+            node.get_logger().debug(f'DRIFT detected ({math.degrees(angle_error):.1f}° > {math.degrees(drift_tolerance):.1f}°) - need realignment')
             node.stop_robot()
             return py_trees.common.Status.FAILURE
         
-        # Move straight - NO angular correction
+        # Get AprilTag lateral centering correction
+        apriltag_angular_correction = self.get_apriltag_lateral_correction(node, target_x, target_y)
+        
+        # Move with gentle angular correction for AprilTag-based centering
         cmd = Twist()
         cmd.linear.x = node.linear_speed
-        cmd.angular.z = 0.0
+        
+        # Apply AprilTag correction with very reduced gain for smooth movement
+        if abs(apriltag_angular_correction) > 0.02:  # Only apply if significant
+            cmd.angular.z = apriltag_angular_correction * 0.4  # 40% of calculated correction (ridotto da 60%)
+        else:
+            cmd.angular.z = 0.0
         
         # Slow down when approaching
         if distance < 0.25:
