@@ -247,6 +247,16 @@ class BehaviorTreeController(Node):
         # Check if mission complete
         if self.tree.status == py_trees.common.Status.SUCCESS:
             self.get_logger().info('✅ Behavior tree completed successfully!')
+            self.get_logger().info('🛑 Stopping all timers and logging...')
+            
+            # Stop all timers to prevent further logging
+            self.tree_timer.cancel()
+            self.marker_timer.cancel()
+            self.lidar_check_timer.cancel()
+            
+            # Stop robot
+            self.stop_robot()
+            
             self.tree = None  # Stop ticking
 
     # ========================================================================
