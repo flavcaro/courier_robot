@@ -16,8 +16,6 @@ flowchart TD
     
     %% Phase 1: Navigate To Pickup
     NavPickupComplete["Nav To Pickup Complete<br/>↻(FailureIsSuccess)"]
-    NavPickupLoop["Navigate Pickup Loop<br/>↻(Repeat: 999x)"]
-    NavPickupRetry["Try Cell<br/>↻(Retry: 5x)"]
     NavCell1["Navigate One Cell<br/>→(Sequence)"]
     Battery1["Battery Management<br/>?(Selector)"]
     CheckBatt1["Check Battery<br/>◇(Condition)"]
@@ -43,8 +41,6 @@ flowchart TD
     
     %% Phase 4: Navigate Home
     NavHomeComplete["Nav To Home Complete<br/>↻(FailureIsSuccess)"]
-    NavHomeLoop["Navigate Home Loop<br/>↻(Repeat: 999x)"]
-    NavHomeRetry["Try Cell<br/>↻(Retry: 5x)"]
     NavCell2["Navigate One Cell<br/>→(Sequence)"]
     Battery2["Battery Management<br/>?(Selector)"]
     CheckBatt2["Check Battery<br/>◇(Condition)"]
@@ -72,9 +68,7 @@ flowchart TD
     Root --> DeliverySeq
     
     %% Navigate to Pickup structure
-    NavPickupComplete --> NavPickupLoop
-    NavPickupLoop --> NavPickupRetry
-    NavPickupRetry --> NavCell1
+    NavPickupComplete --> NavCell1
     NavCell1 --> Battery1
     NavCell1 --> NavSeq1
     Battery1 --> CheckBatt1
@@ -91,9 +85,7 @@ flowchart TD
     PickupSeq --> CollectObject
     
     %% Navigate to Home structure
-    NavHomeComplete --> NavHomeLoop
-    NavHomeLoop --> NavHomeRetry
-    NavHomeRetry --> NavCell2
+    NavHomeComplete -->  NavCell2
     NavCell2 --> Battery2
     NavCell2 --> NavSeq2
     Battery2 --> CheckBatt2
@@ -118,6 +110,6 @@ flowchart TD
     
     class Battery1,Battery2,MoveOrHandle1,MoveOrHandle2 selector
     class Root,NavCell1,NavCell2,NavSeq1,NavSeq2,PickupSeq,DeliverySeq sequence
-    class NavPickupComplete,NavPickupLoop,NavPickupRetry,NavHomeComplete,NavHomeLoop,NavHomeRetry decorator
+    class NavPickupComplete,NavHomeComplete decorator
     class CheckBatt1,CheckBatt2 condition
     class PlanPath,GetWaypoint1,Rotate1,Move1,HandleObs1,Center1,AlignPickup,CollectObject,PlanReturn,RecenterPickup,GetWaypoint2,Rotate2,Move2,HandleObs2,Center2,AlignHome,DeliverObject action
