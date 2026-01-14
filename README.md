@@ -42,7 +42,82 @@ The robot uses a hierarchical behavior tree (py_trees) for mission control, navi
   [Navigation] [Mission] [Obstacle] [Battery]
 ```
 
-## Project Structure
+## UML Class Diagram
+
+The project includes a detailed UML class diagram in [`robot.drawio`](robot.drawio), illustrating the key classes, their attributes/methods, and relationships. It covers:
+
+- **Robot**: Core state (position, battery) and ROS2 interfaces (subscribers/publishers).
+- **AprilTag**: Localization markers with detection methods.
+- **BehaviorTree**: Hierarchical structure with root sequence and blackboard.
+- **Behavior (Abstract)**: Base class for all BT nodes (update, initialise, terminate).
+- **Controller**: Manages BT execution and integrates with Robot/AprilTag.
+- **NavigationBehavior**: Handles movement (rotate, move, get waypoint).
+- **MissionBehavior**: Manages pickup/delivery (collect, deliver, plan path).
+- **SensorBehavior**: Monitors battery and obstacles.
+- **WorldSpawner**: Spawns the grid world, obstacles, and AprilTags in the simulation.
+
+Relationships include inheritance (e.g., behaviors extend Behavior), associations (e.g., Controller manages BehaviorTree), and dependencies (e.g., Robot detects and corrects pose using AprilTag).
+
+Render the diagram in Draw.io for visualization. It accurately represents the modular, behavior-tree-driven architecture.
+
+## Docker Deployment
+
+The project uses Docker for containerization to ensure a consistent, reproducible environment across different systems. This eliminates dependency conflicts and simplifies setup for ROS2, Gazebo, and Python libraries.
+
+### Docker Image and Scripts
+- **`Dockerfile`**: Defines the custom Docker image based on `tiryoh/ros2-desktop-vnc:jazzy` (ROS2 Jazzy with VNC). It installs additional ROS2 packages (e.g., `cv-bridge`, `tf2-ros`), Python dependencies (OpenCV, py_trees, NumPy), and configures the environment.
+- **`start_first_time.bat`**: Windows script for initial setup. Checks if Docker is running, builds the image if it doesn't exist (may take 10-15 minutes), and starts the container with VNC access.
+- **`start_container.bat`**: Quick-start script for subsequent runs. Assumes the image is already built; starts the container directly.
+- **`run_docker.bat`**: Minimal script to run the container, similar to `start_container.bat` but with streamlined output.
+- **`build_docker.bat`**: Dedicated script to build the Docker image manually.
+
+### Container Configuration
+The container runs with:
+- **VNC Access**: Available at `http://localhost:6080` for GUI interaction (Gazebo, RViz).
+- **GPU Support**: `--gpus all` enables hardware acceleration for simulations.
+- **Volume Mount**: `-v ./ros2_ws:/home/ubuntu/ros2_ws` mounts the source code for live development.
+- **ROS2 Setup**: Automatically sources the ROS2 environment in the container's bashrc.
+
+### Benefits
+- **Isolation**: No need to install ROS2 or dependencies on the host machine.
+- **Portability**: Works on Windows, Linux, or macOS with Docker.
+- **Development**: Changes to code in `ros2_ws` are reflected immediately in the container.
+- **Troubleshooting**: If builds fail, ensure internet access for apt updates; for GPU issues, verify Docker Desktop GPU settings.
+
+## Quick Start
+
+### Prerequisites
+- Docker Desktop with GPU support (recommended)
+- Windows 10/11 or Linux
+
+### First-Time Setup
+
+1. Clone the repository
+2. Run `start_first_time.bat` (Windows) or build Docker manually:
+   ```bash
+   docker build -t courier-robot:latest .
+   ```
+
+### Running the Simulation
+
+1. Start the container:
+   ```bash
+   # Windows
+   start_container.bat
+   
+   # Or manually
+   docker run -it --rm -p 6080:80 --gpus all -v ./ros2_ws:/home/ubuntu/ros2_ws --name courier_robot courier-robot:latest
+   ```
+
+2. Open browser at `http://localhost:6080` for VNC desktop
+
+3. In the container terminal:
+   ```bash
+   cd /home/ubuntu/ros2_ws
+   colcon build --symlink-install
+   source install/setup.bash
+   ./start_mission.sh
+   ```
 
 ```
 courier_robot/
@@ -51,6 +126,7 @@ courier_robot/
 ├── start_container.bat           # Quick start container
 ├── build_docker.bat              # Build Docker image
 ├── run_docker.bat                # Run Docker container
+├── robot.drawio                  # UML class diagram
 └── ros2_ws/
     ├── start_mission.sh          # Main mission launch script
     ├── robot.sdf                 # Robot model (SDF)
