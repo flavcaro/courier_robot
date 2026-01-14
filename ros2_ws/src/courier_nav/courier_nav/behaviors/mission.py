@@ -92,19 +92,11 @@ class AlignWithAprilTag(py_trees.behaviour.Behaviour):
             else:
                 # Completed full rotation, no target tag found
                 node.stop_robot()
-                if node.last_apriltag_time is None:
-                    node.get_logger().warn('⚠️  AprilTag localizer may not be working (no data received)')
-                elif detected_tag_id != self.target_tag_id:
-                    node.get_logger().warn(f'⚠️  AprilTag #{self.target_tag_id} not found (detected #{detected_tag_id} instead)')
-                else:
-                    node.get_logger().warn(f'⚠️  AprilTag #{self.target_tag_id} not visible (last seen {tag_age:.1f}s ago)')
-                node.get_logger().warn('    Proceeding with odometry position')
                 return py_trees.common.Status.SUCCESS
         
         # No alignment phase - just wait for timeout if tag is lost
         if elapsed > self.max_wait_time:
             node.stop_robot()
-            node.get_logger().warn('⚠️  AprilTag search timeout, proceeding with odometry position')
             return py_trees.common.Status.SUCCESS
         
         return py_trees.common.Status.RUNNING
