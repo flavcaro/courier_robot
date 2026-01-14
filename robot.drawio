@@ -283,7 +283,7 @@
                 </mxCell>
                 <mxCell id="317" value="uses for world setup" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" connectable="0" vertex="1" parent="316">
                     <mxGeometry x="0.5" y="-2" relative="1" as="geometry">
-                        <mxPoint as="offset"/>
+                        <mxPoint x="-57" y="-15" as="offset"/>
                     </mxGeometry>
                 </mxCell>
             </root>

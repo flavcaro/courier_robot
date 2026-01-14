@@ -42,6 +42,24 @@ The robot uses a hierarchical behavior tree (py_trees) for mission control, navi
   [Navigation] [Mission] [Obstacle] [Battery]
 ```
 
+## UML Class Diagram
+
+The project includes a detailed UML class diagram in [`robot.drawio`](robot.drawio), illustrating the key classes, their attributes/methods, and relationships. It covers:
+
+- **Robot**: Core state (position, battery) and ROS2 interfaces (subscribers/publishers).
+- **AprilTag**: Localization markers with detection methods.
+- **BehaviorTree**: Hierarchical structure with root sequence and blackboard.
+- **Behavior (Abstract)**: Base class for all BT nodes (update, initialise, terminate).
+- **Controller**: Manages BT execution and integrates with Robot/AprilTag.
+- **NavigationBehavior**: Handles movement (rotate, move, get waypoint).
+- **MissionBehavior**: Manages pickup/delivery (collect, deliver, plan path).
+- **SensorBehavior**: Monitors battery and obstacles.
+- **WorldSpawner**: Spawns the grid world, obstacles, and AprilTags in the simulation.
+
+Relationships include inheritance (e.g., behaviors extend Behavior), associations (e.g., Controller manages BehaviorTree), and dependencies (e.g., Robot detects and corrects pose using AprilTag).
+
+Render the diagram in Draw.io for visualization. It accurately represents the modular, behavior-tree-driven architecture.
+
 ## Project Structure
 
 ```
@@ -51,6 +69,7 @@ courier_robot/
 ├── start_container.bat           # Quick start container
 ├── build_docker.bat              # Build Docker image
 ├── run_docker.bat                # Run Docker container
+├── robot.drawio                  # UML class diagram
 └── ros2_ws/
     ├── start_mission.sh          # Main mission launch script
     ├── robot.sdf                 # Robot model (SDF)
