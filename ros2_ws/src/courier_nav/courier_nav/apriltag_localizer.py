@@ -401,7 +401,7 @@ class AprilTagLocalizer(Node):
         
         # Sanity check 1: reject poses outside valid grid bounds (0-5m with some margin)
         if x < -0.5 or x > 5.5 or y < -0.5 or y > 5.5:
-            self.get_logger().warn(f'Tag #{tag_id} rejected: out of bounds ({x:.2f}, {y:.2f})', throttle_duration_sec=2.0)
+            # self.get_logger().warn(f'Tag #{tag_id} rejected: out of bounds ({x:.2f}, {y:.2f})', throttle_duration_sec=2.0)
             return
         
         # Sanity check 2: if we have odometry, reject if pose differs by > 1.5m
@@ -412,11 +412,11 @@ class AprilTagLocalizer(Node):
             diff = np.sqrt((x - odom_x)**2 + (y - odom_y)**2)
             
             if diff > 1.5:
-                self.get_logger().warn(
-                    f'Tag #{tag_id} rejected: too far from odom ({diff:.2f}m > 1.5m) - '
-                    f'Tag pose=({x:.2f},{y:.2f}) vs Odom=({odom_x:.2f},{odom_y:.2f})',
-                    throttle_duration_sec=2.0
-                )
+                # self.get_logger().warn(
+                #     f'Tag #{tag_id} rejected: too far from odom ({diff:.2f}m > 1.5m) - '
+                #     f'Tag pose=({x:.2f},{y:.2f}) vs Odom=({odom_x:.2f},{odom_y:.2f})',
+                #     throttle_duration_sec=2.0
+                # )
                 return
         
         pose_msg = PoseWithCovarianceStamped()
