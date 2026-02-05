@@ -1,3 +1,0 @@
-"""
-Courier Navigation Package
-"""

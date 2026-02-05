@@ -1,9 +1,9 @@
-build/
-install/
-log/
+# Ignora file non necessari per Makeblock
+rpi_standalone/
 *.pyc
 __pycache__/
+.vscode/
 *.swp
 *.swo
 *~
-.vscode/
+.DS_Store
