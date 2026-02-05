@@ -29,7 +29,6 @@ setup(
     entry_points={
         'console_scripts': [
             'mission_controller = courier_nav.mission_controller:main',
-            'spawner = courier_nav.world_spawner:main',
             'apriltag_localizer = courier_nav.apriltag_localizer:main',
         ],
     },

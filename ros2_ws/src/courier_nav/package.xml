@@ -13,7 +13,7 @@
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>visualization_msgs</depend>
-  <depend>gazebo_msgs</depend>
+
   
   <!-- TF and robot state -->
   <depend>tf2</depend>
