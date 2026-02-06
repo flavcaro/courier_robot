@@ -61,32 +61,42 @@ if (-not $pingResult) {
 Write-Host "Raspberry Pi raggiungibile" -ForegroundColor Green
 Write-Host ""
 
+# Crea struttura directory se non esiste
+Write-Host "Verifica struttura directory..." -ForegroundColor Yellow
+if ($USE_SSH_KEYS) {
+    & $SSH_CMD "$RPI_USER@$RPI_HOST" "mkdir -p $RPI_MAIN_DIR $RPI_BT_DIR"
+} else {
+    & $SSH_CMD $SSH_OPTS.Split() "$RPI_USER@$RPI_HOST" "mkdir -p $RPI_MAIN_DIR $RPI_BT_DIR"
+}
+Write-Host "Struttura directory verificata" -ForegroundColor Green
+Write-Host ""
+
 # Backup file esistenti
 Write-Host "Backup file esistenti..." -ForegroundColor Yellow
 if ($USE_SSH_KEYS) {
-    & $SSH_CMD "$RPI_USER@$RPI_HOST" "cd $RPI_BT_DIR && cp sensors.py sensors.py.backup 2>/dev/null || true"
+    & $SSH_CMD "$RPI_USER@$RPI_HOST" "cd $RPI_BT_DIR && for f in *.py; do [ -f `"`$f`" ] && cp `"`$f`" `"`$f.backup`" 2>/dev/null || true; done"
+    & $SSH_CMD "$RPI_USER@$RPI_HOST" "cd $RPI_MAIN_DIR && for f in *.py; do [ -f `"`$f`" ] && cp `"`$f`" `"`$f.backup`" 2>/dev/null || true; done"
 } else {
-    & $SSH_CMD $SSH_OPTS.Split() "$RPI_USER@$RPI_HOST" "cd $RPI_BT_DIR && cp sensors.py sensors.py.backup 2>/dev/null || true"
+    & $SSH_CMD $SSH_OPTS.Split() "$RPI_USER@$RPI_HOST" "cd $RPI_BT_DIR && for f in *.py; do [ -f `"`$f`" ] && cp `"`$f`" `"`$f.backup`" 2>/dev/null || true; done"
+    & $SSH_CMD $SSH_OPTS.Split() "$RPI_USER@$RPI_HOST" "cd $RPI_MAIN_DIR && for f in *.py; do [ -f `"`$f`" ] && cp `"`$f`" `"`$f.backup`" 2>/dev/null || true; done"
 }
 Write-Host "Backup completato" -ForegroundColor Green
 Write-Host ""
 
-# Copia nuovi file
-Write-Host "Copia file di navigazione..." -ForegroundColor Yellow
+# Copia file del modulo bt/
+Write-Host "Copia file del modulo bt/..." -ForegroundColor Yellow
 
-$files = @(
-    @{Source = "$LOCAL_DIR\sensors.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_BT_DIR/"},
-    @{Source = "$LOCAL_DIR\navigation_actions.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_BT_DIR/"},
-    @{Source = "$LOCAL_DIR\navigation_behaviours.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_BT_DIR/"},
-    @{Source = "$LOCAL_DIR\main_mission.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_MAIN_DIR/"}
-)
-
+# Get all .py files from bt/ subdirectory
+$btFiles = Get-ChildItem -Path "$LOCAL_DIR\bt" -Filter "*.py" -File
 $allSuccess = $true
-foreach ($file in $files) {
+
+foreach ($file in $btFiles) {
+    $fileName = $file.Name
+    Write-Host "  Copiando bt/$fileName..." -ForegroundColor Gray
     if ($USE_SSH_KEYS) {
-        & $SCP_CMD $file.Source $file.Dest
+        & $SCP_CMD "$LOCAL_DIR\bt\$fileName" "$RPI_USER@$RPI_HOST`:$RPI_BT_DIR/"
     } else {
-        & $SCP_CMD $SCP_OPTS.Split() $file.Source $file.Dest
+        & $SCP_CMD $SCP_OPTS.Split() "$LOCAL_DIR\bt\$fileName" "$RPI_USER@$RPI_HOST`:$RPI_BT_DIR/"
     }
     if ($LASTEXITCODE -ne 0) {
         $allSuccess = $false
@@ -94,19 +104,18 @@ foreach ($file in $files) {
 }
 
 Write-Host ""
-Write-Host "Copia file di supporto..." -ForegroundColor Yellow
+Write-Host "Copia file principali..." -ForegroundColor Yellow
 
-$supportFiles = @(
-    @{Source = "$LOCAL_DIR\rover_API.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_MAIN_DIR/"},
-    @{Source = "$LOCAL_DIR\main.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_MAIN_DIR/"},
-    @{Source = "$LOCAL_DIR\wifi_bridge.py"; Dest = "$RPI_USER@$RPI_HOST`:$RPI_MAIN_DIR/"}
-)
+# Get all .py files from root directory (excluding subdirectories)
+$mainFiles = Get-ChildItem -Path "$LOCAL_DIR" -Filter "*.py" -File
 
-foreach ($file in $supportFiles) {
+foreach ($file in $mainFiles) {
+    $fileName = $file.Name
+    Write-Host "  Copiando $fileName..." -ForegroundColor Gray
     if ($USE_SSH_KEYS) {
-        & $SCP_CMD $file.Source $file.Dest
+        & $SCP_CMD "$LOCAL_DIR\$fileName" "$RPI_USER@$RPI_HOST`:$RPI_MAIN_DIR/"
     } else {
-        & $SCP_CMD $SCP_OPTS.Split() $file.Source $file.Dest
+        & $SCP_CMD $SCP_OPTS.Split() "$LOCAL_DIR\$fileName" "$RPI_USER@$RPI_HOST`:$RPI_MAIN_DIR/"
     }
     if ($LASTEXITCODE -ne 0) {
         $allSuccess = $false
@@ -126,9 +135,9 @@ if ($allSuccess) {
 Write-Host ""
 Write-Host "Verifica file..." -ForegroundColor Yellow
 if ($USE_SSH_KEYS) {
-    & $SSH_CMD "$RPI_USER@$RPI_HOST" "ls -lh $RPI_BT_DIR/*.py $RPI_MAIN_DIR/main_mission.py $RPI_MAIN_DIR/rover_API.py $RPI_MAIN_DIR/main.py $RPI_MAIN_DIR/wifi_bridge.py"
+    & $SSH_CMD "$RPI_USER@$RPI_HOST" "echo '=== File in bt/ ===' && ls -lh $RPI_BT_DIR/*.py && echo '' && echo '=== File nella directory principale ===' && ls -lh $RPI_MAIN_DIR/*.py"
 } else {
-    & $SSH_CMD $SSH_OPTS.Split() "$RPI_USER@$RPI_HOST" "ls -lh $RPI_BT_DIR/*.py $RPI_MAIN_DIR/main_mission.py $RPI_MAIN_DIR/rover_API.py $RPI_MAIN_DIR/main.py $RPI_MAIN_DIR/wifi_bridge.py"
+    & $SSH_CMD $SSH_OPTS.Split() "$RPI_USER@$RPI_HOST" "echo '=== File in bt/ ===' && ls -lh $RPI_BT_DIR/*.py && echo '' && echo '=== File nella directory principale ===' && ls -lh $RPI_MAIN_DIR/*.py"
 }
 
 Write-Host ""
@@ -147,13 +156,8 @@ Write-Host "   source ~/venv/bin/activate  # Attiva virtual environment"
 Write-Host "   python3 main_mission.py"
 Write-Host ""
 Write-Host "File installati:" -ForegroundColor Yellow
-Write-Host "   - $RPI_BT_DIR/sensors.py (aggiornato)"
-Write-Host "   - $RPI_BT_DIR/navigation_actions.py (nuovo)"
-Write-Host "   - $RPI_BT_DIR/navigation_behaviours.py (nuovo)"
-Write-Host "   - $RPI_MAIN_DIR/main_mission.py (nuovo)"
-Write-Host "   - $RPI_MAIN_DIR/rover_API.py (aggiornato)"
-Write-Host "   - $RPI_MAIN_DIR/main.py (aggiornato)"
-Write-Host "   - $RPI_MAIN_DIR/wifi_bridge.py (aggiornato)"
+Write-Host "   - Tutti i file .py da bt/ -> $RPI_BT_DIR/"
+Write-Host "   - Tutti i file .py dalla root -> $RPI_MAIN_DIR/"
 Write-Host ""
 Write-Host "NOTA: " -ForegroundColor Yellow -NoNewline
 if ($USE_SSH_KEYS) {
