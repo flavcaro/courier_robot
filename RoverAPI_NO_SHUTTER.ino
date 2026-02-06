@@ -53,35 +53,26 @@ void loop() {
     // } else {
  
     // Comandi motori (SEMPRE ESEGUITI)
+    // CONFIGURAZIONE: motor1 = cingolo SINISTRO, motor2 = cingolo DESTRO
     if (cmd == "Forward") {
-      motor1.run(speed);
-      motor2.run(speed);
-      motor3.run(-speed);
-      motor4.run(-speed);
+      motor1.run(speed);    // Cingolo sinistro avanti
+      motor2.run(-speed);   // Cingolo destro avanti (invertito)
     }
     else if (cmd == "Back") {
-      motor1.run(-speed);
-      motor2.run(-speed);
-      motor3.run(speed);
-      motor4.run(speed);
+      motor1.run(-speed);   // Cingolo sinistro indietro
+      motor2.run(speed);    // Cingolo destro indietro (invertito)
     }
     else if (cmd == "Left") {
-      motor1.run(-speed);
-      motor2.run(-speed);
-      motor3.run(-speed);
-      motor4.run(-speed);
+      motor1.run(-speed);   // Cingolo sinistro indietro
+      motor2.run(-speed);   // Cingolo destro avanti → ruota a sinistra
     }
     else if (cmd == "Right") {
-      motor1.run(speed);
-      motor2.run(speed);
-      motor3.run(speed);
-      motor4.run(speed);
+      motor1.run(speed);    // Cingolo sinistro avanti
+      motor2.run(speed);    // Cingolo destro indietro → ruota a destra
     }
     else if (cmd == "Stop") {
       motor1.stop();
       motor2.stop();
-      motor3.stop();
-      motor4.stop();
     }
     else if (cmd == "ultrasonic") {
       double distance = ultraSensor.distanceCm();
