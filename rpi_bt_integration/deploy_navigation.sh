@@ -37,6 +37,12 @@ scp "$LOCAL_DIR/navigation_actions.py" "$RPI_USER@$RPI_HOST:$RPI_BT_DIR/"
 scp "$LOCAL_DIR/navigation_behaviours.py" "$RPI_USER@$RPI_HOST:$RPI_BT_DIR/"
 scp "$LOCAL_DIR/main_mission.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
 
+echo ""
+echo "📤 Copia file di supporto..."
+scp "$LOCAL_DIR/rover_API.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
+scp "$LOCAL_DIR/main.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
+scp "$LOCAL_DIR/wifi_bridge.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
+
 if [ $? -eq 0 ]; then
     echo ""
     echo "✅ File copiati con successo!"
@@ -49,7 +55,7 @@ fi
 # Verifica installazione
 echo ""
 echo "🔍 Verifica file..."
-ssh "$RPI_USER@$RPI_HOST" "ls -lh $RPI_BT_DIR/*.py $RPI_MAIN_DIR/main_mission.py"
+ssh "$RPI_USER@$RPI_HOST" "ls -lh $RPI_BT_DIR/*.py $RPI_MAIN_DIR/main_mission.py $RPI_MAIN_DIR/rover_API.py $RPI_MAIN_DIR/main.py $RPI_MAIN_DIR/wifi_bridge.py"
 
 echo ""
 echo "=========================================="
@@ -67,5 +73,8 @@ echo "   - $RPI_BT_DIR/sensors.py (aggiornato)"
 echo "   - $RPI_BT_DIR/navigation_actions.py (nuovo)"
 echo "   - $RPI_BT_DIR/navigation_behaviours.py (nuovo)"
 echo "   - $RPI_MAIN_DIR/main_mission.py (nuovo)"
+echo "   - $RPI_MAIN_DIR/rover_API.py (aggiornato)"
+echo "   - $RPI_MAIN_DIR/main.py (aggiornato)"
+echo "   - $RPI_MAIN_DIR/wifi_bridge.py (aggiornato)"
 echo ""
 raspberr
