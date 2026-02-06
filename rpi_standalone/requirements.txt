@@ -1,2 +1,0 @@
-py-trees>=2.2.0
-pyserial>=3.5
