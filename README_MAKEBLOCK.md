@@ -5,17 +5,24 @@ Branch dedicato al codice per il robot fisico Makeblock Ultimate con Raspberry P
 ## 📁 Struttura Repository
 
 ```
-courier_robot1/
-├── RoverAPI.ino                  # Sketch Arduino per Makeblock
-├── rpi_bt_integration/           # Codice Python per Raspberry Pi
+courier_robot1/ (branch makeblock)
+├── RoverAPI.ino                  # Firmware Arduino standard
+├── RoverAPI_NO_SHUTTER.ino       # Firmware senza controllo shutter (per debug)
+├── rpi_bt_integration/           # Sistema navigazione Raspberry Pi
 │   ├── sensors.py                # Gestione sensori e stato robot
-│   ├── navigation_actions.py     # Azioni navigazione + BFS
-│   ├── navigation_behaviours.py  # Nodi Behavior Tree
-│   ├── main_mission.py           # Controller principale
-│   ├── deploy_navigation.sh      # Script deployment
-│   └── INSTALLAZIONE.md          # Guida installazione
-└── README_MAKEBLOCK.md           # Questa guida
+│   ├── navigation_actions.py     # Azioni navigazione + BFS pathfinding
+│   ├── navigation_behaviours.py  # Nodi Behavior Tree per navigazione
+│   ├── main_mission.py           # Controller principale missione
+│   ├── deploy_navigation.sh      # Script deployment automatico
+│   └── INSTALLAZIONE.md          # Guida installazione dettagliata
+├── README_MAKEBLOCK.md           # Questa guida
+└── .gitignore                    # Esclude file non necessari
 ```
+
+**File esclusi** (presenti su altri branch):
+- `ros2_ws/` - Simulazione ROS2 (solo su branch `final`)
+- `rpi_standalone/` - Versione alternativa non usata
+- `build/`, `install/`, `log/` - Artifact ROS2
 
 ## 🤖 Hardware Richiesto
 
