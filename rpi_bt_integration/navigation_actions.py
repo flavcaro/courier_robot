@@ -32,12 +32,18 @@ def rotate_to_angle(target_yaw, speed=0.3, tolerance=0.15):
     Returns:
         bool: True se rotazione completata, False se ostacolo
     """
-    max_iterations = 50
+    max_iterations = 100  # Aumentato da 50 a 100
     iteration = 0
+    
+    print(f"🔄 Rotazione: da {math.degrees(robot_state.robot_yaw):.1f}° a {math.degrees(target_yaw):.1f}°")
     
     while iteration < max_iterations:
         # Calcola errore angolare
         angle_error = normalize_angle(target_yaw - robot_state.robot_yaw)
+        
+        # Debug ogni 10 iterazioni
+        if iteration % 10 == 0:
+            print(f"   [Iter {iteration}] Yaw={math.degrees(robot_state.robot_yaw):.1f}°, Errore={math.degrees(angle_error):.1f}°")
         
         # Controlla se raggiunto
         if abs(angle_error) < tolerance:
@@ -54,10 +60,10 @@ def rotate_to_angle(target_yaw, speed=0.3, tolerance=0.15):
         # Ruota
         if angle_error > 0:
             rover.moveTo('Left', speed)
-            angular_velocity = speed * 1.0  # rad/s stimato
+            angular_velocity = speed * 0.3  # RIDOTTO: rad/s stimato (era 1.0)
         else:
             rover.moveTo('Right', speed)
-            angular_velocity = -speed * 1.0
+            angular_velocity = -speed * 0.3  # RIDOTTO: rad/s stimato (era -1.0)
         
         time.sleep(0.1)
         rover.stop()
@@ -69,7 +75,8 @@ def rotate_to_angle(target_yaw, speed=0.3, tolerance=0.15):
         iteration += 1
     
     rover.stop()
-    print("⚠️ Timeout rotazione")
+    print(f"⚠️ Timeout rotazione dopo {max_iterations} iterazioni")
+    print(f"   Yaw finale: {math.degrees(robot_state.robot_yaw):.1f}°, Target: {math.degrees(target_yaw):.1f}°")
     return False
 
 
