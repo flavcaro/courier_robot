@@ -235,17 +235,72 @@ def create_delivery_mission():
     return root
 
 
+
+
+class FollowPathFromBlackboard(py_trees.behaviour.Behaviour):
+    """Segue il percorso salvato nella blackboard."""
+    
+    def __init__(self, name="FollowPath"):
+        super().__init__(name)
+        self.path = None
+        self.current_index = 0
+        
+    def initialise(self):
+        # Leggi percorso dalla blackboard
+        self.blackboard = self.attach_blackboard_client()
+        self.blackboard.register_key(key="path", access=py_trees.common.Access.READ)
+        self.path = self.blackboard.get("path")
+        self.current_index = 1  # Salta la prima cella (posizione corrente)
+        
+        if self.path:
+            print(f"📍 Percorso da seguire: {self.path}")
+            print(f"🚀 Partenza da cella {self.current_index}: {self.path[self.current_index] if self.current_index < len(self.path) else 'Nessuna'}")
+        else:
+            print("⚠️ Nessun percorso nella blackboard!")
+        
+    def update(self):
+        if not self.path:
+            print("❌ Nessun percorso nella blackboard!")
+            return py_trees.common.Status.FAILURE
+            
+        if self.current_index >= len(self.path):
+            print("✅ Percorso completato!")
+            return py_trees.common.Status.SUCCESS
+        
+        target_row, target_col = self.path[self.current_index]
+        print(f"🎯 Cella {self.current_index + 1}/{len(self.path)}: ({target_row}, {target_col})")
+        
+        if move_to_cell(target_row, target_col):
+            self.current_index += 1
+            if self.current_index >= len(self.path):
+                return py_trees.common.Status.SUCCESS
+            return py_trees.common.Status.RUNNING
+        else:
+            print(f"❌ Fallimento navigazione verso ({target_row}, {target_col})")
+            return py_trees.common.Status.FAILURE
+
+
 def create_simple_navigation_test():
     """
-    Crea un semplice test di navigazione verso una cella.
-    Utile per testare il sistema prima della missione completa.
+    Test navigazione con pathfinding BFS.
+    Pianifica percorso verso goal, lo segue, poi torna a start.
     """
-    root = py_trees.composites.Sequence(name="Navigation Test", memory=False)
+    root = py_trees.composites.Sequence(name="Navigation Test", memory=True)
     
-    # Test: vai a (1, 2) e torna a (0, 0)
-    go_to_goal = NavigateToCell(1, 2, name="Go to (1,2)")
-    go_to_start = NavigateToCell(0, 0, name="Return to (0,0)")
+    # Fase 1: Pianifica e segui percorso verso goal
+    plan_to_goal = PlanPath(goal_cell=(1, 2), name="Plan to (1,2)")
+    navigate_to_goal = FollowPathFromBlackboard(name="Navigate to (1,2)")
     
-    root.add_children([go_to_goal, go_to_start])
+    # Fase 2: Pianifica e segui percorso verso start
+    plan_to_start = PlanPath(goal_cell=(0, 0), name="Plan to (0,0)")
+    navigate_to_start = FollowPathFromBlackboard(name="Navigate to (0,0)")
+    
+    root.add_children([
+        plan_to_goal,
+        navigate_to_goal,
+        plan_to_start,
+        navigate_to_start
+    ])
     
     return root
+

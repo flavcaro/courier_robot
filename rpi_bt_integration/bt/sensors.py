@@ -3,6 +3,7 @@ Sensori per il robot - Integrato con rover_API esistente.
 """
 from rover_API import RoverApi
 import time
+import math
 
 # Usa l'istanza rover globale da actions.py
 from .actions import rover
@@ -56,13 +57,18 @@ class RobotState:
         # === Stato Robot (odometria stimata) ===
         self.robot_x = 0.0
         self.robot_y = 0.0
-        self.robot_yaw = 0.0  # Radianti
+        self.robot_yaw = math.pi / 2  # Radianti - Robot inizia orientato NORD (avanti)
+        self.robot_heading = 'N'  # Direzione cardinale: 'N', 'E', 'S', 'W'
         
         # === Parametri Controllo ===
-        self.rotation_speed = 0.6    # 60% - robot si muove bene
-        self.linear_speed = 0.5      # 50% - velocità ottimale
+        self.rotation_speed = 1.0    # 100% - rotazione richiede potenza massima
+        self.linear_speed = 1.0      # 100% - movimento fluido senza scatti
         self.angle_tolerance = 0.20  # ~11.5°
         self.position_tolerance = 0.25  # 25cm
+        
+        # === Calibrazione Movimento Temporizzato ===
+        self.rotation_90_time = 5.9 # secondi per ruotare 90° al 100%
+        self.cell_move_time = 4.5    # secondi per muoversi 0.6m (una cella) al 100%
         
         # === Sensori ===
         self.front_distance = 400.0

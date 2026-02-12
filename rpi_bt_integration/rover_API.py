@@ -62,6 +62,21 @@ class RoverApi:
         except ValueError:
             return 400.0  # Nessun ostacolo
 
+    def getBatteryVoltage(self):
+        """
+        Legge tensione della batteria.
+        
+        Returns:
+            float: Tensione in Volt (es. 7.4V per batteria LiPo 2S)
+        """
+        self.ser.write("battery\n".encode())
+        time.sleep(0.1)
+        data = self.ser.readline().decode().strip()
+        try:
+            return float(data)
+        except ValueError:
+            return 0.0  # Errore lettura
+
     def getIMU(self):
         """
         Legge dati dall'IMU (accelerometro e giroscopio).

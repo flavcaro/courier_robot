@@ -29,19 +29,33 @@ ssh "$RPI_USER@$RPI_HOST" "cd $RPI_BT_DIR && cp sensors.py sensors.py.backup 2>/
 echo "✅ Backup completato"
 echo ""
 
-# Copia nuovi file
-echo "📤 Copia file di navigazione..."
-
-scp "$LOCAL_DIR/sensors.py" "$RPI_USER@$RPI_HOST:$RPI_BT_DIR/"
-scp "$LOCAL_DIR/navigation_actions.py" "$RPI_USER@$RPI_HOST:$RPI_BT_DIR/"
-scp "$LOCAL_DIR/navigation_behaviours.py" "$RPI_USER@$RPI_HOST:$RPI_BT_DIR/"
-scp "$LOCAL_DIR/main_mission.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
+# Copia file del modulo bt/
+echo "📤 Copia file del modulo bt/..."
+for file in "$LOCAL_DIR/bt"/*.py; do
+    if [ -f "$file" ]; then
+        filename=$(basename "$file")
+        echo "  Copiando bt/$filename..."
+        scp "$file" "$RPI_USER@$RPI_HOST:$RPI_BT_DIR/"
+        if [ $? -ne 0 ]; then
+            echo "❌ Errore copiando $filename"
+            exit 1
+        fi
+    fi
+done
 
 echo ""
-echo "📤 Copia file di supporto..."
-scp "$LOCAL_DIR/rover_API.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
-scp "$LOCAL_DIR/main.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
-scp "$LOCAL_DIR/wifi_bridge.py" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
+echo "📤 Copia file principali..."
+for file in "$LOCAL_DIR"/*.py; do
+    if [ -f "$file" ]; then
+        filename=$(basename "$file")
+        echo "  Copiando $filename..."
+        scp "$file" "$RPI_USER@$RPI_HOST:$RPI_MAIN_DIR/"
+        if [ $? -ne 0 ]; then
+            echo "❌ Errore copiando $filename"
+            exit 1
+        fi
+    fi
+done
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -55,7 +69,11 @@ fi
 # Verifica installazione
 echo ""
 echo "🔍 Verifica file..."
-ssh "$RPI_USER@$RPI_HOST" "ls -lh $RPI_BT_DIR/*.py $RPI_MAIN_DIR/main_mission.py $RPI_MAIN_DIR/rover_API.py $RPI_MAIN_DIR/main.py $RPI_MAIN_DIR/wifi_bridge.py"
+echo "=== File in bt/ ==="
+ssh "$RPI_USER@$RPI_HOST" "ls -lh $RPI_BT_DIR/*.py"
+echo ""
+echo "=== File nella directory principale ==="
+ssh "$RPI_USER@$RPI_HOST" "ls -lh $RPI_MAIN_DIR/*.py"
 
 echo ""
 echo "=========================================="
@@ -69,12 +87,7 @@ echo "   source ~/venv/bin/activate  # Attiva virtual environment"
 echo "   python3 main_mission.py"
 echo ""
 echo "📝 File installati:"
-echo "   - $RPI_BT_DIR/sensors.py (aggiornato)"
-echo "   - $RPI_BT_DIR/navigation_actions.py (nuovo)"
-echo "   - $RPI_BT_DIR/navigation_behaviours.py (nuovo)"
-echo "   - $RPI_MAIN_DIR/main_mission.py (nuovo)"
-echo "   - $RPI_MAIN_DIR/rover_API.py (aggiornato)"
-echo "   - $RPI_MAIN_DIR/main.py (aggiornato)"
-echo "   - $RPI_MAIN_DIR/wifi_bridge.py (aggiornato)"
+echo "   - Tutti i file .py da bt/ → $RPI_BT_DIR/"
+echo "   - Tutti i file .py dalla root → $RPI_MAIN_DIR/"
 echo ""
 raspberr
