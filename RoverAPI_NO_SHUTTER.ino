@@ -56,7 +56,7 @@ void loop() {
     // CONFIGURAZIONE: motor1 = cingolo SINISTRO, motor2 = cingolo DESTRO
     if (cmd == "Forward") {
       motor1.run(speed);    // Cingolo sinistro avanti
-      motor2.run(-speed);   // Cingolo destro avanti (invertito)
+      motor2.run(speed);    // Cingolo destro avanti (CAMBIATO: era -speed)
     }
     else if (cmd == "Back") {
       motor1.run(-speed);   // Cingolo sinistro indietro
