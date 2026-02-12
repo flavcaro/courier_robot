@@ -3,12 +3,12 @@
 #include <MPU6050.h>
 
 // -------------------- MOTORI --------------------
-MeMegaPiDCMotor motor1(PORT1A);
-MeMegaPiDCMotor motor2(PORT1B);
+MeMegaPiDCMotor motor1(PORT1A);  // Cingolo SINISTRO
+MeMegaPiDCMotor motor2(PORT1B);  // Cingolo DESTRO
 MeMegaPiDCMotor motor3(PORT2A);
 MeMegaPiDCMotor motor4(PORT2B);
-MeMegaPiDCMotor motor5(PORT3A);
-MeMegaPiDCMotor motor6(PORT3B);
+MeMegaPiDCMotor motor5(PORT3A);  // Braccio
+MeMegaPiDCMotor motor6(PORT3B);  // Braccio
 MeMegaPiDCMotor motorHand(PORT4B);
 
 // -------------------- SENSORI --------------------
@@ -17,44 +17,15 @@ MePort shutterPort(PORT_8);
 MPU6050 imu;
 
 // -------------------- PARAMETRI --------------------
-int speed = 100;             // usato per i cingoli (e anche come "time" per mano come nel tuo codice)
-float trimLeft = 1.05;       // +5% al cingolo sinistro per andare più dritto (TARABILE)
-const int MAX_PWM = 255;     // limite PWM tipico
-
-int clampPwm(int v) {
-  if (v >  MAX_PWM) return  MAX_PWM;
-  if (v < -MAX_PWM) return -MAX_PWM;
-  return v;
-}
-
-// Applica trim al sinistro e inversione al destro
-// NOTA: motor1 è il cingolo DESTRO, motor2 è il cingolo SINISTRO (fisicamente)
-void driveTracks(int left, int right) {
-  int l = (int)(left * trimLeft);
-  int r = right;
-
-  l = clampPwm(l);
-  r = clampPwm(r);
-
-  motor2.run(-l);     // cingolo sinistro → motor2 (invertito)
-  motor1.run(r);      // cingolo destro → motor1
-}
-
-void stopTracks() {
-  motor1.stop();
-  motor2.stop();
-}
+int speed = 100;  // Variabile globale per velocità
 
 void setup() {
   Serial.begin(115200);
   Wire.begin();
   pinMode(shutterPort.pin1(), INPUT);
-
-  imu.initialize(); // nel tuo mancava
-
-  Serial.println("Robot pronto! (Shutter check DISABILITATO per test)");
-  Serial.print("TrimLeft iniziale: ");
-  Serial.println(trimLeft, 2);
+  imu.initialize();  // AGGIUNTO: inizializza IMU
+  
+  Serial.println("Robot pronto! (Shutter check DISABILITATO)");
 }
 
 void loop() {
@@ -66,55 +37,36 @@ void loop() {
 
     int separatore = input.indexOf(':');
     String cmd;
-    int value = 0;
+    int time = 0;
 
     if (separatore != -1) {
       cmd = input.substring(0, separatore);
-      value = input.substring(separatore + 1).toInt();
+      speed = input.substring(separatore + 1).toInt();
     } else {
       cmd = input;
     }
 
     // -------------------- COMANDI CINGOLI --------------------
+    // CONFIGURAZIONE TUA ORIGINALE: motor1 = SINISTRO, motor2 = DESTRO
     if (cmd == "Forward") {
-      if (separatore != -1) speed = value;
-      speed = clampPwm(speed);
-      driveTracks(speed, speed);
+      motor1.run(speed);    // Sinistro avanti
+      motor2.run(-speed);   // Destro avanti (invertito)
     }
     else if (cmd == "Back") {
-      if (separatore != -1) speed = value;
-      speed = clampPwm(speed);
-      driveTracks(-speed, -speed);
+      motor1.run(-speed);   // Sinistro indietro
+      motor2.run(speed);    // Destro indietro (invertito)
     }
     else if (cmd == "Left") {
-      if (separatore != -1) speed = value;
-      speed = clampPwm(speed);
-      // gira sul posto: sinistro indietro, destro avanti (logico)
-      driveTracks(-speed, speed);
+      motor1.run(-speed);   // Sinistro indietro
+      motor2.run(-speed);   // Destro avanti → ruota a sinistra
     }
     else if (cmd == "Right") {
-      if (separatore != -1) speed = value;
-      speed = clampPwm(speed);
-      // gira sul posto: sinistro avanti, destro indietro (logico)
-      driveTracks(speed, -speed);
+      motor1.run(speed);    // Sinistro avanti
+      motor2.run(speed);    // Destro indietro → ruota a destra
     }
     else if (cmd == "Stop") {
-      stopTracks();
-    }
-
-    // -------------------- TRIM PER ANDARE DRITTO --------------------
-    // Usa: Trim:105  => trimLeft = 1.05
-    //      Trim:100  => trimLeft = 1.00 (nessuna compensazione)
-    //      Trim:112  => trimLeft = 1.12
-    else if (cmd == "Trim") {
-      // limiti sensati: 50..150 => 0.50..1.50
-      if (value >= 50 && value <= 150) {
-        trimLeft = value / 100.0;
-        Serial.print("TrimLeft aggiornato: ");
-        Serial.println(trimLeft, 2);
-      } else {
-        Serial.println("Trim fuori range. Usa Trim:50..Trim:150 (0.50..1.50)");
-      }
+      motor1.stop();
+      motor2.stop();
     }
 
     // -------------------- SENSORI --------------------
@@ -141,7 +93,11 @@ void loop() {
       Serial.print("Shutter state: ");
       Serial.println(shutterState);
     }
+    
+    // -------------------- BATTERIA (NUOVO!) --------------------
     else if (cmd == "battery") {
+      // ATTENZIONE: Richiede voltage divider su pin A0
+      // Se NON hai voltage divider, commenta questo blocco
       int rawValue = analogRead(A0);
       float voltage = (rawValue * 5.0 / 1023.0) * 2.0;
       Serial.println(voltage);
@@ -158,25 +114,22 @@ void loop() {
     else if (cmd == "armDown") {
       motor5.run(-80);
       motor6.run(-80);
-      delay((int)(250 * 4.5));
+      delay(250 * 4.5);
       motor5.stop();
       motor6.stop();
     }
 
     // -------------------- MANO --------------------
-    // Mantengo la tua logica: openHand:XXX usa XXX come tempo, altrimenti usa speed come tempo
     else if (cmd == "openHand") {
-      int timeMs = (separatore != -1) ? value : speed;
-      if (timeMs < 0) timeMs = 0;
+      time = speed;  // Usa velocità come tempo (tua logica originale)
       motorHand.run(-100);
-      delay(timeMs);
+      delay(time);
       motorHand.stop();
     }
     else if (cmd == "closeHand") {
-      int timeMs = (separatore != -1) ? value : speed;
-      if (timeMs < 0) timeMs = 0;
+      time = speed;  // Usa velocità come tempo (tua logica originale)
       motorHand.run(100);
-      delay(timeMs);
+      delay(time);
       motorHand.stop();
     }
 
