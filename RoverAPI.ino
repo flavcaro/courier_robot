@@ -12,7 +12,7 @@ MeUltrasonicSensor ultraSensor(PORT_7);
 int speed = 100;  // di default
 
 void setup() {
- Serial.begin(9600);
+ Serial.begin(115200);  // Cambiato da 9600 a 115200 per compatibilità
 }
 
 void loop() {
