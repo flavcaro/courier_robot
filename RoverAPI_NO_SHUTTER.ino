@@ -27,7 +27,8 @@ int clampPwm(int v) {
   return v;
 }
 
-// Applica trim al sinistro e inversione al destro (come nel tuo codice originale)
+// Applica trim al sinistro e inversione al destro
+// NOTA: motor1 è il cingolo DESTRO, motor2 è il cingolo SINISTRO (fisicamente)
 void driveTracks(int left, int right) {
   int l = (int)(left * trimLeft);
   int r = right;
@@ -35,8 +36,8 @@ void driveTracks(int left, int right) {
   l = clampPwm(l);
   r = clampPwm(r);
 
-  motor1.run(-l);     // cingolo sinistro (INVERTITO per correggere direzione)
-  motor2.run(r);      // cingolo destro
+  motor2.run(-l);     // cingolo sinistro → motor2 (invertito)
+  motor1.run(r);      // cingolo destro → motor1
 }
 
 void stopTracks() {
