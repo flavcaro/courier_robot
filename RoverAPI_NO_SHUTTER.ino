@@ -35,8 +35,8 @@ void driveTracks(int left, int right) {
   l = clampPwm(l);
   r = clampPwm(r);
 
-  motor1.run(l);      // cingolo sinistro
-  motor2.run(-r);     // cingolo destro INVERTITO (coerente col tuo Forward/Back originali)
+  motor1.run(-l);     // cingolo sinistro (INVERTITO per correggere direzione)
+  motor2.run(r);      // cingolo destro
 }
 
 void stopTracks() {
