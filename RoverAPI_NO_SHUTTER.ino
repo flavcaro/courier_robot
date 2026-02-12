@@ -1,8 +1,8 @@
 #include "MeMegaPi.h"
 #include <Wire.h>
 #include <MPU6050.h>
- 
-// Motori
+
+// -------------------- MOTORI --------------------
 MeMegaPiDCMotor motor1(PORT1A);
 MeMegaPiDCMotor motor2(PORT1B);
 MeMegaPiDCMotor motor3(PORT2A);
@@ -10,113 +10,127 @@ MeMegaPiDCMotor motor4(PORT2B);
 MeMegaPiDCMotor motor5(PORT3A);
 MeMegaPiDCMotor motor6(PORT3B);
 MeMegaPiDCMotor motorHand(PORT4B);
- 
-// Sensori
+
+// -------------------- SENSORI --------------------
 MeUltrasonicSensor ultraSensor(PORT_7);
 MePort shutterPort(PORT_8);
 MPU6050 imu;
- 
-int speed = 100;
- 
+
+// -------------------- PARAMETRI --------------------
+int speed = 100;             // usato per i cingoli (e anche come "time" per mano come nel tuo codice)
+float trimLeft = 1.05;       // +5% al cingolo sinistro per andare più dritto (TARABILE)
+const int MAX_PWM = 255;     // limite PWM tipico
+
+int clampPwm(int v) {
+  if (v >  MAX_PWM) return  MAX_PWM;
+  if (v < -MAX_PWM) return -MAX_PWM;
+  return v;
+}
+
+// Applica trim al sinistro e inversione al destro (come nel tuo codice originale)
+void driveTracks(int left, int right) {
+  int l = (int)(left * trimLeft);
+  int r = right;
+
+  l = clampPwm(l);
+  r = clampPwm(r);
+
+  motor1.run(l);      // cingolo sinistro
+  motor2.run(-r);     // cingolo destro INVERTITO (coerente col tuo Forward/Back originali)
+}
+
+void stopTracks() {
+  motor1.stop();
+  motor2.stop();
+}
+
 void setup() {
   Serial.begin(115200);
   Wire.begin();
   pinMode(shutterPort.pin1(), INPUT);
+
+  imu.initialize(); // nel tuo mancava
+
   Serial.println("Robot pronto! (Shutter check DISABILITATO per test)");
+  Serial.print("TrimLeft iniziale: ");
+  Serial.println(trimLeft, 2);
 }
- 
+
 void loop() {
   int shutterState = shutterPort.dRead1();
- 
+
   if (Serial.available()) {
-    String input = Serial.readStringUntil('\n');  
+    String input = Serial.readStringUntil('\n');
     input.trim();
- 
+
     int separatore = input.indexOf(':');
     String cmd;
-    int time = 0;
- 
+    int value = 0;
+
     if (separatore != -1) {
       cmd = input.substring(0, separatore);
-      speed = input.substring(separatore + 1).toInt();
+      value = input.substring(separatore + 1).toInt();
     } else {
       cmd = input;
     }
- 
-    // ⚠️ CONTROLLO ANTICOLLISIONE DISABILITATO PER TEST
-    // if (shutterState == LOW && (cmd == "Forward" || cmd == "Back")) {
-    //   Serial.println("Ostacolo rilevato! Movimento fermato.");
-    //   motor1.stop();
-    //   motor2.stop();
-    //   motor3.stop();
-    //   motor4.stop();
-    // } else {
- 
-    // Comandi motori (SEMPRE ESEGUITI)
-    // CONFIGURAZIONE: motor1 = cingolo SINISTRO, motor2 = cingolo DESTRO
+
+    // -------------------- COMANDI CINGOLI --------------------
     if (cmd == "Forward") {
-      // Compensazione: cingolo sinistro leggermente più veloce per andare dritto
-      int leftSpeed = speed * 1.05;  // +5% al sinistro
-      if (leftSpeed > 100) leftSpeed = 100;  // Limita a 100
-      motor1.run(leftSpeed);    // Cingolo sinistro avanti (compensato)
-      motor2.run(-speed);       // Cingolo destro avanti (invertito)
+      if (separatore != -1) speed = value;
+      speed = clampPwm(speed);
+      driveTracks(speed, speed);
     }
     else if (cmd == "Back") {
-      motor1.run(-speed);   // Cingolo sinistro indietro
-      motor2.run(speed);    // Cingolo destro indietro (invertito)
+      if (separatore != -1) speed = value;
+      speed = clampPwm(speed);
+      driveTracks(-speed, -speed);
     }
     else if (cmd == "Left") {
-      motor1.run(-speed);   // Cingolo sinistro indietro
-      motor2.run(-speed);   // Cingolo destro avanti → ruota a sinistra
+      if (separatore != -1) speed = value;
+      speed = clampPwm(speed);
+      // gira sul posto: sinistro indietro, destro avanti (logico)
+      driveTracks(-speed, speed);
     }
     else if (cmd == "Right") {
-      motor1.run(speed);    // Cingolo sinistro avanti
-      motor2.run(speed);    // Cingolo destro indietro → ruota a destra
+      if (separatore != -1) speed = value;
+      speed = clampPwm(speed);
+      // gira sul posto: sinistro avanti, destro indietro (logico)
+      driveTracks(speed, -speed);
     }
     else if (cmd == "Stop") {
-      motor1.stop();
-      motor2.stop();
+      stopTracks();
     }
+
+    // -------------------- TRIM PER ANDARE DRITTO --------------------
+    // Usa: Trim:105  => trimLeft = 1.05
+    //      Trim:100  => trimLeft = 1.00 (nessuna compensazione)
+    //      Trim:112  => trimLeft = 1.12
+    else if (cmd == "Trim") {
+      // limiti sensati: 50..150 => 0.50..1.50
+      if (value >= 50 && value <= 150) {
+        trimLeft = value / 100.0;
+        Serial.print("TrimLeft aggiornato: ");
+        Serial.println(trimLeft, 2);
+      } else {
+        Serial.println("Trim fuori range. Usa Trim:50..Trim:150 (0.50..1.50)");
+      }
+    }
+
+    // -------------------- SENSORI --------------------
     else if (cmd == "ultrasonic") {
       double distance = ultraSensor.distanceCm();
       delay(100);
       Serial.println(distance);
     }
-    else if (cmd == "armUP") {
-      motor5.run(80);
-      motor6.run(80);
-      delay(250 * 5);
-      motor5.stop();
-      motor6.stop();
-    }
-    else if (cmd == "armDown") {
-      motor5.run(-80);
-      motor6.run(-80);
-      delay(250 * 4.5);
-      motor5.stop();
-      motor6.stop();
-    }
-    else if (cmd == "openHand") {
-      time = speed;
-      motorHand.run(-100);
-      delay(time);
-      motorHand.stop();
-    }
-    else if (cmd == "closeHand") {
-      time = speed;
-      motorHand.run(100);
-      delay(time);
-      motorHand.stop();
-    }
     else if (cmd == "imu") {
       int16_t ax, ay, az, gx, gy, gz;
       imu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
- 
+
       Serial.print("Acc: ");
       Serial.print(ax); Serial.print(", ");
       Serial.print(ay); Serial.print(", ");
       Serial.println(az);
- 
+
       Serial.print("Gyro: ");
       Serial.print(gx); Serial.print(", ");
       Serial.print(gy); Serial.print(", ");
@@ -127,18 +141,48 @@ void loop() {
       Serial.println(shutterState);
     }
     else if (cmd == "battery") {
-      // Leggi tensione batteria da pin analogico A0
-      // Voltage divider: Vbat -> R1(10k) -> A0 -> R2(10k) -> GND
-      // Vout = Vbat * 0.5, quindi Vbat = (analogRead * 5.0 / 1023) * 2
       int rawValue = analogRead(A0);
       float voltage = (rawValue * 5.0 / 1023.0) * 2.0;
       Serial.println(voltage);
     }
+
+    // -------------------- BRACCIO --------------------
+    else if (cmd == "armUP") {
+      motor5.run(80);
+      motor6.run(80);
+      delay(250 * 5);
+      motor5.stop();
+      motor6.stop();
+    }
+    else if (cmd == "armDown") {
+      motor5.run(-80);
+      motor6.run(-80);
+      delay((int)(250 * 4.5));
+      motor5.stop();
+      motor6.stop();
+    }
+
+    // -------------------- MANO --------------------
+    // Mantengo la tua logica: openHand:XXX usa XXX come tempo, altrimenti usa speed come tempo
+    else if (cmd == "openHand") {
+      int timeMs = (separatore != -1) ? value : speed;
+      if (timeMs < 0) timeMs = 0;
+      motorHand.run(-100);
+      delay(timeMs);
+      motorHand.stop();
+    }
+    else if (cmd == "closeHand") {
+      int timeMs = (separatore != -1) ? value : speed;
+      if (timeMs < 0) timeMs = 0;
+      motorHand.run(100);
+      delay(timeMs);
+      motorHand.stop();
+    }
+
     else {
       Serial.println("Comando non riconosciuto: " + cmd);
     }
-    // } // Fine else del controllo anticollisione
   }
- 
+
   delay(50);
 }
