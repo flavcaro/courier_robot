@@ -2,7 +2,7 @@
 # Script per copiare i file di navigazione sulla Raspberry Pi
 
 RPI_USER="pi"
-RPI_HOST="pi.local"
+RPI_HOST="10.83.223.122"
 RPI_BT_DIR="/home/pi/robot_code/bt"
 RPI_MAIN_DIR="/home/pi/robot_code"
 LOCAL_DIR="$(dirname "$0")"

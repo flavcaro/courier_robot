@@ -1,13 +1,8 @@
 from rover_API import RoverApi
 import time
 
-# Inizializza il rover con compensazione tensione attiva
-rover = RoverApi(
-    port='/dev/ttyUSB0',
-    enable_voltage_compensation=True,  # Compensazione automatica per calo batteria
-    reference_voltage=7.4,              # Tensione di riferimento (batteria carica)
-    min_voltage=6.4                     # Tensione minima per avviso
-)
+# Inizializza il rover
+rover = RoverApi(port='/dev/ttyUSB0')
 print(f"Arduino connesso su /dev/ttyUSB0")
 
 def move_forward(duration=1.0):
