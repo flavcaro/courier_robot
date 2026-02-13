@@ -1,6 +1,11 @@
+import time
+
 class RobotState:
     def __init__(self):
-        ...
+        # Default base values (added to prevent AttributeError if missing)
+        self.base_rotation_90_time = 6.5
+        self.base_cell_move_time = 2.0
+        
         self.reference_voltage = 7.4
         self.current_voltage = 7.4
         self.min_voltage = 6.4
@@ -12,15 +17,15 @@ class RobotState:
         self.compensation_factor = 1.0
         self.rotation_90_time = self.base_rotation_90_time
         self.cell_move_time = self.base_cell_move_time
-        ...
+        
 
-    def update_battery_voltage(self):
+    def update_battery_voltage(self, rover_api):
         """Legge tensione batteria e aggiorna fattore di compensazione (safe + media)."""
         try:
             # media di 3 letture per evitare sag istantaneo
             samples = []
             for _ in range(3):
-                v = rover.getBatteryVoltage()
+                v = rover_api.getBatteryVoltage()
                 samples.append(v)
                 time.sleep(0.05)
 
@@ -55,3 +60,6 @@ class RobotState:
             self.compensation_factor = 1.0
             self.rotation_90_time = self.base_rotation_90_time
             self.cell_move_time = self.base_cell_move_time
+
+# Instantiate the global state object
+robot_state = RobotState()

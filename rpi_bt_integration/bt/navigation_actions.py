@@ -90,7 +90,7 @@ def move_to_cell(target_row, target_col):
         return False
     
     # Aggiorna compensazione tensione batteria prima del movimento
-    robot_state.update_battery_voltage()
+    robot_state.update_battery_voltage(rover)
     
     print(f"🎯 Movimento da ({current_row},{current_col}) a ({target_row},{target_col})")
     
