@@ -11,15 +11,6 @@ MeUltrasonicSensor ultraSensor(PORT_7);
 
 int speed = 100;  // di default
 
-// Pin per lettura tensione batteria
-#define BATTERY_PIN A0
-// Fattore di conversione per divisore di tensione
-// Se usi un divisore 2:1 (es. 10kΩ + 10kΩ), il fattore è 2.0
-// Se colleghi direttamente (batteria 2S LiPo max 8.4V, Arduino max 5V), usa un divisore!
-#define VOLTAGE_DIVIDER_FACTOR 2.0
-// Tensione di riferimento Arduino (5V per MegaPi)
-#define ARDUINO_VREF 5.0
-
 void setup() {
  Serial.begin(115200);
 }
