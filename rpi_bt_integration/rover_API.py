@@ -51,3 +51,20 @@ class RoverApi:
     def closeHand(self, time):
         to_send = f"closeHand:{time}\n"
         self.ser.write(to_send.encode())
+
+    def getBatteryVoltage(self):
+        """
+        Legge la tensione della batteria in Volt.
+        
+        Returns:
+            float: Tensione batteria in Volt (es. 7.4V per batteria carica)
+        """
+        self.ser.write("getBattery\n".encode())
+        time.sleep(0.1)  # Attesa per lettura ADC
+        data = self.ser.readline().decode().strip()
+        try:
+            return float(data)
+        except ValueError:
+            print(f"Errore lettura tensione batteria: {data}")
+            return 7.4  # Valore di fallback (batteria carica)
+

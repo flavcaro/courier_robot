@@ -66,9 +66,19 @@ class RobotState:
         self.angle_tolerance = 0.20  # ~11.5°
         self.position_tolerance = 0.25  # 25cm
         
-        # === Calibrazione Movimento Temporizzato ===
-        self.rotation_90_time = 5.9 # secondi per ruotare 90° al 100%
-        self.cell_move_time = 4.5    # secondi per muoversi 0.6m (una cella) al 100%
+        # === Calibrazione Movimento Temporizzato (valori base a tensione di riferimento) ===
+        self.base_rotation_90_time = 5.9  # secondi per ruotare 90° al 100% con batteria carica
+        self.base_cell_move_time = 4.5    # secondi per muoversi 0.6m (una cella) al 100%
+        
+        # === Compensazione Tensione Batteria ===
+        self.reference_voltage = 7.4  # Tensione di riferimento (batteria LiPo 2S carica)
+        self.current_voltage = 7.4    # Tensione corrente (aggiornata dinamicamente)
+        self.min_voltage = 6.4        # Tensione minima consigliata
+        self.compensation_factor = 1.0  # Fattore di compensazione calcolato
+        
+        # Tempi compensati (aggiornati automaticamente)
+        self.rotation_90_time = self.base_rotation_90_time
+        self.cell_move_time = self.base_cell_move_time
         
         # === Sensori ===
         self.front_distance = 400.0
@@ -77,6 +87,33 @@ class RobotState:
         # === Timing ===
         self.start_time = time.time()
         
+    def update_battery_voltage(self):
+        """Legge tensione batteria e aggiorna fattore di compensazione."""
+        try:
+            self.current_voltage = rover.getBatteryVoltage()
+            
+            # Calcola fattore di compensazione
+            # Quando la batteria è scarica, i motori girano più lenti
+            # quindi serve PIÙ tempo per fare la stessa rotazione
+            self.compensation_factor = self.reference_voltage / self.current_voltage
+            
+            # Applica compensazione ai tempi
+            self.rotation_90_time = self.base_rotation_90_time * self.compensation_factor
+            self.cell_move_time = self.base_cell_move_time * self.compensation_factor
+            
+            print(f"🔋 Batteria: {self.current_voltage:.2f}V (riferimento: {self.reference_voltage}V)")
+            print(f"   Fattore compensazione: {self.compensation_factor:.3f}")
+            print(f"   Tempo rotazione 90°: {self.rotation_90_time:.2f}s (base: {self.base_rotation_90_time}s)")
+            
+            # Avviso se batteria bassa
+            if self.current_voltage < self.min_voltage:
+                print(f"⚠️  ATTENZIONE: Batteria bassa ({self.current_voltage:.2f}V)! Ricaricare presto.")
+                
+        except Exception as e:
+            print(f"❌ Errore lettura tensione batteria: {e}")
+            print(f"   Uso valori base senza compensazione")
+            self.compensation_factor = 1.0
+    
     def update_sensors(self):
         """Aggiorna letture sensori."""
         self.front_distance = get_ultrasonic_distance()

@@ -11,6 +11,15 @@ MeUltrasonicSensor ultraSensor(PORT_7);
 
 int speed = 100;  // di default
 
+// Pin per lettura tensione batteria
+const int BATTERY_PIN = A0;
+// Fattore di conversione per divisore di tensione
+// Se usi un divisore 2:1 (es. 10kΩ + 10kΩ), il fattore è 2.0
+// Se colleghi direttamente (batteria 2S LiPo max 8.4V, Arduino max 5V), usa un divisore!
+const float VOLTAGE_DIVIDER_FACTOR = 2.0;
+// Tensione di riferimento Arduino (5V per MegaPi)
+const float VREF = 5.0;
+
 void setup() {
  Serial.begin(115200);
 }
@@ -85,6 +94,13 @@ void loop() {
           motorHand.run(100);
           delay(time);
           motorHand.stop();
+    }else if (cmd == "getBattery"){
+      // Leggi tensione batteria
+      int adcValue = analogRead(BATTERY_PIN);
+      // Converti ADC (0-1023) in tensione (0-5V) e applica fattore divisore
+      float voltage = (adcValue / 1023.0) * VREF * VOLTAGE_DIVIDER_FACTOR;
+      // Invia tensione con 2 decimali
+      Serial.println(voltage, 2);
     }else {
       Serial.println("Comando non riconosciuto: " + cmd);
     }
