@@ -9,6 +9,7 @@ import math
 from .actions import rover, move_forward, move_back, move_left, move_right
 from .actions import arm_up, arm_down, open_hand, close_hand
 from .sensors import robot_state
+from .actions import DEFAULT_SPEED_LINEAR, DEFAULT_SPEED_TURN
 
 
 def normalize_angle(angle):
@@ -27,61 +28,40 @@ def normalize_angle(angle):
 # ============================================================================
 
 def rotate_90_degrees(direction='right', compensate_drift=True):
-    """
-    Ruota esattamente 90° usando tempo calibrato.
-    
-    Args:
-        direction: 'right' o 'left'
-        compensate_drift: Se True, compensa lo slittamento all'indietro
-    """
     print(f"🔄 Rotazione 90° a {'destra' if direction == 'right' else 'sinistra'}...")
-    
-    if direction == 'right':
-        rover.moveTo('Right', 1.0)
-    else:
-        rover.moveTo('Left', 1.0)
-    
+
+    cmd = 'Right' if direction == 'right' else 'Left'
+    rover.moveTo(cmd, DEFAULT_SPEED_TURN)
     time.sleep(robot_state.rotation_90_time)
     rover.stop()
-    time.sleep(0.2)  # Pausa per stabilizzazione
-    
-    # Compensazione drift: piccolo movimento avanti per recuperare slittamento
+    time.sleep(0.1)
+
+    # drift: meglio disattivarlo per test consumi (puoi rimettere True dopo)
     if compensate_drift:
-        rover.moveTo('Forward', 0.5)  # 50% velocità
-        time.sleep(0.3)  # ~200ms di movimento per compensare
+        rover.moveTo('Forward', min(DEFAULT_SPEED_LINEAR, 0.30))
+        time.sleep(0.15)
         rover.stop()
-        time.sleep(0.1)
-    
-    print(f"✓ Rotazione completata!")
+        time.sleep(0.05)
+
+    print("✓ Rotazione completata!")
 
 
 def rotate_180_degrees():
-    """
-    Ruota esattamente 180° usando tempo calibrato.
-    Usa una singola rotazione continua invece di 2x90° per evitare accumulo errori.
-    """
-    print(f"🔄 Rotazione 180° (inversione direzione)...")
-    
-    # Rotazione continua di 180° = doppio tempo di 90°
-    rover.moveTo('Right', 1.0)
-    time.sleep(robot_state.rotation_90_time * 2.3)
+    print("🔄 Rotazione 180° (inversione)...")
+    rover.moveTo('Right', DEFAULT_SPEED_TURN)
+    time.sleep(robot_state.rotation_90_time * 2.0)
     rover.stop()
-    time.sleep(0.3)  # Pausa più lunga per stabilizzazione
-    
-    print(f"✓ Rotazione 180° completata!")
-
+    time.sleep(0.15)
+    print("✓ Rotazione 180° completata!")
 
 
 def move_one_cell_forward():
-    """Muove avanti di esattamente una cella (60cm) usando tempo calibrato."""
-    print(f"➡️  Movimento avanti di una cella (60cm)...")
-    
-    rover.moveTo('Forward', 1.0)
+    print("➡️  Movimento avanti di una cella (60cm)...")
+    rover.moveTo('Forward', DEFAULT_SPEED_LINEAR)
     time.sleep(robot_state.cell_move_time)
     rover.stop()
-    time.sleep(0.2)  # Pausa per stabilizzazione
-    
-    print(f"✓ Cella raggiunta!")
+    time.sleep(0.1)
+    print("✓ Cella raggiunta!")
 
 
 def move_to_cell(target_row, target_col):

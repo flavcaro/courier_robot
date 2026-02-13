@@ -1,54 +1,58 @@
 from rover_API import RoverApi
 import time
 
-# Inizializza il rover
 rover = RoverApi(port='/dev/ttyUSB0')
-print(f"Arduino connesso su /dev/ttyUSB0")
+print("Arduino connesso su /dev/ttyUSB0")
 
-def move_forward(duration=1.0):
-    print("Sto andando avanti...")
-    rover.moveTo('Forward', duration)
+# ===== PROFILO ECO =====
+DEFAULT_SPEED_LINEAR = 0.40  # avanti/indietro
+DEFAULT_SPEED_TURN = 0.35    # rotazioni
+STOP_PAUSE = 0.05
+
+
+def move_forward(duration=1.0, speed=DEFAULT_SPEED_LINEAR):
+    rover.moveTo('Forward', speed)
     time.sleep(duration)
     rover.stop()
-    time.sleep(0.2)
+    time.sleep(STOP_PAUSE)
 
-def move_back(duration=1.0):
-    print("Sto andando indietro...")
-    rover.moveTo('Back', duration)
+
+def move_back(duration=1.0, speed=DEFAULT_SPEED_LINEAR):
+    rover.moveTo('Back', speed)
     time.sleep(duration)
     rover.stop()
-    time.sleep(0.2)
+    time.sleep(STOP_PAUSE)
 
-def move_left(duration=1.0):
-    print("Sto girando a sinistra...")
-    rover.moveTo('Left', duration)
+
+def move_left(duration=1.0, speed=DEFAULT_SPEED_TURN):
+    rover.moveTo('Left', speed)
     time.sleep(duration)
     rover.stop()
-    time.sleep(0.2)
+    time.sleep(STOP_PAUSE)
 
-def move_right(duration=1.0):
-    print("Sto girando a destra...")
-    rover.moveTo('Right', duration)
+
+def move_right(duration=1.0, speed=DEFAULT_SPEED_TURN):
+    rover.moveTo('Right', speed)
     time.sleep(duration)
     rover.stop()
-    time.sleep(0.2)
+    time.sleep(STOP_PAUSE)
+
 
 def arm_up():
-    print("Braccio su")
     rover.armUP()
     time.sleep(0.5)
 
+
 def arm_down():
-    print("Braccio giù")
     rover.armDown()
     time.sleep(0.5)
 
+
 def open_hand(pwm=1500):
-    print("Apro la mano")
     rover.openHand(pwm)
     time.sleep(0.5)
 
+
 def close_hand(pwm=1750):
-    print("Chiudo la mano")
     rover.closeHand(pwm)
     time.sleep(0.5)
