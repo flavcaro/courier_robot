@@ -12,7 +12,7 @@ MeUltrasonicSensor ultraSensor(PORT_7);
 int speed = 100;  // di default
 
 void setup() {
- Serial.begin(115200);  // Cambiato da 9600 a 115200 per compatibilità
+ Serial.begin(115200);
 }
 
 void loop() {
@@ -32,25 +32,31 @@ void loop() {
     }
 
     // Esegui comando
-    // CONFIGURAZIONE: motor1 = cingolo SINISTRO, motor2 = cingolo DESTRO
     if (cmd == "Forward") {
-      // Compensazione: cingolo sinistro leggermente più veloce per andare dritto
-      int leftSpeed = speed * 1.05;  // +5% al sinistro
-      if (leftSpeed > 100) leftSpeed = 100;  // Limita a 100
-      motor1.run(leftSpeed);    // Cingolo sinistro avanti (compensato)
-      motor2.run(-speed);       // Cingolo destro avanti (invertito)
+      motor1.run(speed);
+      motor2.run(speed);
+      motor3.run(-speed);
+      motor4.run(-speed);
     } else if (cmd == "Back") {
-      motor1.run(-speed);   // Cingolo sinistro indietro
-      motor2.run(speed);    // Cingolo destro indietro (invertito)
+      motor1.run(-speed);
+      motor2.run(-speed);
+      motor3.run(speed);
+      motor4.run(speed);
     } else if (cmd == "Left") {
-      motor1.run(-speed);   // Cingolo sinistro indietro
-      motor2.run(-speed);   // Cingolo destro avanti → ruota a sinistra
+      motor1.run(-speed);
+      motor2.run(-speed);
+      motor3.run(-speed);
+      motor4.run(-speed);
     } else if (cmd == "Right") {
-      motor1.run(speed);    // Cingolo sinistro avanti
-      motor2.run(speed);    // Cingolo destro indietro → ruota a destra
+      motor1.run(speed);
+      motor2.run(speed);
+      motor3.run(speed);
+      motor4.run(speed);
     } else if (cmd == "Stop") {
       motor1.stop();
       motor2.stop();
+      motor3.stop();
+      motor4.stop();
     } else if ( cmd == "ultrasonic"){
       double distance = ultraSensor.distanceCm();
       delay(100); 
@@ -74,15 +80,6 @@ void loop() {
           delay(time);
           motorHand.stop();
           
-    }else if (cmd == "battery"){
-      // Leggi tensione batteria da pin analogico A0
-      // Assumendo voltage divider: Vbat -> R1(10k) -> A0 -> R2(10k) -> GND
-      // Vout = Vbat * R2/(R1+R2) = Vbat * 0.5
-      // Arduino legge 0-1023 per 0-5V, quindi Vbat = (analogRead * 5.0 / 1023) * 2
-      int rawValue = analogRead(A0);
-      float voltage = (rawValue * 5.0 / 1023.0) * 2.0;  // Moltiplicatore dipende dal voltage divider
-      Serial.println(voltage);
-      
     }else if (cmd == "closeHand"){
       time = speed;
           motorHand.run(100);
