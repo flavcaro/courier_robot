@@ -4,7 +4,7 @@ import time
 
 class RoverApi:
     def __init__(self, port):
-        self.ser = serial.Serial(port, 9600, timeout=1)
+        self.ser = serial.Serial(port, 115200, timeout=1)
         self.commands = ["Forward", "Back", "Left", "Right", "Stop"]
         time.sleep(2)
 

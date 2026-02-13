@@ -191,7 +191,7 @@ def rotate_to_angle(target_yaw, speed=0.5, tolerance=math.radians(5)):
             print(f"✓ Rotazione completata! Yaw={math.degrees(robot_state.robot_yaw):.1f}°")
             
             # Controlla ostacolo
-            robot_state.update_sensors()
+            robot_state.update_sensors(rover)
             if robot_state.front_distance < robot_state.obstacle_threshold:
                 print(f"⚠️ Ostacolo a {robot_state.front_distance:.1f}cm!")
                 return False
