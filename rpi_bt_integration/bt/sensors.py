@@ -3,9 +3,9 @@ import math
 
 class RobotState:
     def __init__(self):
-        # Default base values (added to prevent AttributeError if missing)
-        self.base_rotation_90_time = 6.5
-        self.base_cell_move_time = 2.0
+        # Default base values (calibrati per velocità ECO: 35% rotazioni, 40% lineari)
+        self.base_rotation_90_time = 16.0  # ~18.5s teorico, abbassato per compensare inerzia
+        self.base_cell_move_time = 5.0     # 2.0s * (100/40) = 5.0s per 60cm
         
         self.reference_voltage = 7.4
         self.current_voltage = 7.4
@@ -59,46 +59,12 @@ class RobotState:
             print("⚠️ update_sensors chiamato senza rover_api!")
 
     def update_battery_voltage(self, rover_api):
-        """Legge tensione batteria e aggiorna fattore di compensazione (safe + media)."""
-        try:
-            # media di 3 letture per evitare sag istantaneo
-            samples = []
-            for _ in range(3):
-                v = rover_api.getBatteryVoltage()
-                samples.append(v)
-                time.sleep(0.05)
-
-            v_avg = sum(samples) / len(samples)
-            self.current_voltage = v_avg
-
-            if self.current_voltage < self.min_valid_voltage:
-                # troppo basso o lettura sporca: non impazzire con la compensazione
-                print(f"⚠️ Lettura tensione molto bassa ({self.current_voltage:.2f}V). Uso compensazione=1.0")
-                self.compensation_factor = 1.0
-            else:
-                comp = self.reference_voltage / self.current_voltage
-                # clamp massimo
-                if comp > self.max_compensation:
-                    comp = self.max_compensation
-                if comp < 1.0:
-                    comp = 1.0  # se batteria più alta del reference, non serve ridurre tempi
-
-                self.compensation_factor = comp
-
-            self.rotation_90_time = self.base_rotation_90_time * self.compensation_factor
-            self.cell_move_time = self.base_cell_move_time * self.compensation_factor
-
-            print(f"🔋 Batteria: {self.current_voltage:.2f}V | compensazione: {self.compensation_factor:.3f}")
-            print(f"   rot90: {self.rotation_90_time:.2f}s | cella: {self.cell_move_time:.2f}s")
-
-            if self.current_voltage < self.min_voltage:
-                print(f"⚠️ Batteria bassa ({self.current_voltage:.2f}V)! Ricaricare presto.")
-
-        except Exception as e:
-            print(f"❌ Errore lettura tensione batteria: {e}")
-            self.compensation_factor = 1.0
-            self.rotation_90_time = self.base_rotation_90_time
-            self.cell_move_time = self.base_cell_move_time
+        """Lettura tensione disabilitata - voltage divider non presente."""
+        # Pin A0 non collegato alla batteria → compensazione sempre 1.0
+        # NON stampiamo warning (verrebbe chiamato ad ogni movimento)
+        self.compensation_factor = 1.0
+        self.rotation_90_time = self.base_rotation_90_time
+        self.cell_move_time = self.base_cell_move_time
 
 # Instantiate the global state object
 robot_state = RobotState()

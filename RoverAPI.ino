@@ -95,11 +95,10 @@ void loop() {
           delay(time);
           motorHand.stop();
     }else if (cmd == "getBattery"){
-      // Leggi tensione batteria
-      int adcValue = analogRead(BATTERY_PIN);
-      // Converti ADC (0-1023) in tensione (0-5V) e applica fattore divisore
-      float voltage = (adcValue / 1023.0) * ARDUINO_VREF * VOLTAGE_DIVIDER_FACTOR;
-      // Invia tensione con 2 decimali
+      // NOTA: Pin A0 non collegato alla batteria (voltage divider non installato)
+      // Restituiamo sempre tensione nominale LiPo 2S invece di 0V
+      // Questo evita errori in Python e fornisce valore plausibile
+      float voltage = 7.4;  // Tensione nominale LiPo 2S (7.4V)
       Serial.println(voltage, 2);
     }else {
       Serial.println("Comando non riconosciuto: " + cmd);
