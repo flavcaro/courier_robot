@@ -1,17 +1,22 @@
 from rover_API import RoverApi
+import os
 import time
 
-rover = RoverApi(port='/dev/ttyUSB0')
-print("Arduino connesso su /dev/ttyUSB0")
+# Prova: 1) env var ROVER_PORT, 2) autodetect (se hai messo RoverApi(port=None) come ti ho scritto)
+PORT = os.environ.get("ROVER_PORT", "").strip() or None
+
+rover = RoverApi(port=PORT)   # None => autodetect
+print(f"Arduino connesso su {rover.port}")
 
 # ===== PROFILO ECO - RISPARMIO BATTERIA =====
 DEFAULT_SPEED_LINEAR = 0.60  # Lineare: 60% (ridotto per massimo risparmio)
 DEFAULT_SPEED_TURN = 0.75    # Rotazioni: 75% (per superficie liscia)
 STOP_PAUSE = 0.05
 
-# COMPENSAZIONE DERIVA: motore sinistro leggermente più lento
-# Valore ottimale: 0.97 (3% più lento) per compensare deriva verso sinistra
-LEFT_MOTOR_COMPENSATION = 0.97
+# COMPENSAZIONE DERIVA: motore sinistro leggermente più veloce
+# ⚠️ NOTA: Questi valori NON sono usati dalla missione!
+# La missione usa simple_state.left_factor/right_factor in simple_state.py
+LEFT_MOTOR_COMPENSATION = 1.30
 RIGHT_MOTOR_COMPENSATION = 1.00
 
 def move_forward(duration=1.0, speed=DEFAULT_SPEED_LINEAR):
@@ -50,19 +55,19 @@ def move_right(duration=1.0, speed=DEFAULT_SPEED_TURN):
 
 def arm_up():
     rover.armUP()
-    time.sleep(0.5)
+    time.sleep(3.0)  # Aumentato per completo ritorno posizione iniziale
 
 
 def arm_down():
     rover.armDown()
-    time.sleep(0.5)
+    time.sleep(1.5)  # Simmetrico con arm_up per movimento completo
 
 
 def open_hand(pwm=1500):
     rover.openHand(pwm)
-    time.sleep(0.5)
+    time.sleep(1.0)
 
 
 def close_hand(pwm=1750):
     rover.closeHand(pwm)
-    time.sleep(0.5)
+    time.sleep(1.0)

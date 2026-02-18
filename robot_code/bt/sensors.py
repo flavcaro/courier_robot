@@ -1,6 +1,7 @@
 import time
 import math
-
+from bt.imu_sensor import IMUSensor
+ 
 class RobotState:
     def __init__(self):
         # Tempi calibrati per velocità ECO su superficie liscia (60% lineare, 75% rotazioni)
@@ -10,7 +11,7 @@ class RobotState:
         self.reference_voltage = 7.4
         self.current_voltage = 7.4
         self.min_voltage = 6.4
-
+ 
         # nuovi limiti "anti-escalation" (previene compensazioni eccessive)
         self.max_compensation = 1.25   # massimo +25% tempo
         self.min_valid_voltage = 6.0   # sotto: lettura/sag troppo basso, evita divisioni aggressive
@@ -33,21 +34,33 @@ class RobotState:
         
         self.front_distance = 100.0
         self.obstacle_threshold = 20.0
-
+        
+        # --- IMU ---
+        self.imu = IMUSensor()
+        if self.imu.is_available():
+            print("🧭 IMU abilitato - calibrazione consigliata!")
+        else:
+            print("⚠️ IMU non disponibile - navigazione senza correzione heading")
+ 
     def world_to_cell(self, x, y):
         """Converte coordinate mondo (m) in cella (row, col)."""
         col = int(round(x / self.cell_size))
         row = int(round(y / self.cell_size))
         return row, col
-
+ 
     def cell_to_world(self, row, col):
         """Converte cella (row, col) in coordinate mondo (m)."""
         x = col * self.cell_size
         y = row * self.cell_size
         return x, y
-
+ 
     def update_sensors(self, rover_api=None):
-        """Aggiorna sensori (distanza, ecc)."""
+        """Aggiorna sensori (distanza, IMU, ecc)."""
+        # Aggiorna heading IMU
+        if self.imu.is_available():
+            self.imu.update_heading()
+        
+        # Aggiorna distanza ultrasuoni
         if rover_api:
             try:
                 dist = rover_api.getDistance()
@@ -57,7 +70,7 @@ class RobotState:
                 print(f"❌ Errore lettura sensori: {e}")
         else:
             print("⚠️ update_sensors chiamato senza rover_api!")
-
+ 
     def update_battery_voltage(self, rover_api):
         """Lettura tensione disabilitata - voltage divider non presente."""
         # Pin A0 non collegato alla batteria → compensazione sempre 1.0
@@ -65,7 +78,7 @@ class RobotState:
         self.compensation_factor = 1.0
         self.rotation_90_time = self.base_rotation_90_time
         self.cell_move_time = self.base_cell_move_time
-
+ 
     def print_grid(self, show_path=None):
         """
         Stampa griglia ASCII con posizione robot, ostacoli, goal.
@@ -129,6 +142,7 @@ class RobotState:
         print(f"Robot: ({current_row}, {current_col}) | Goal: {self.goal_cell}")
         print(f"Coordinate mondo: X={self.robot_x:.2f}m, Y={self.robot_y:.2f}m")
         print("═" * (self.grid_size * 4 + 1) + "\n")
-
+ 
 # Instantiate the global state object
 robot_state = RobotState()
+ 

@@ -49,10 +49,74 @@ def _read_distance():
 # ROTAZIONI CARDINALI (90°)
 # ============================================================================
  
+def rotate_90_with_imu(direction_str, target_degrees=90.0, timeout=5.0):
+    """
+    Rotazione di 90° usando feedback IMU invece del tempo.
+   
+    Args:
+        direction_str: 'left' o 'right'
+        target_degrees: angolo target (default 90°)
+        timeout: timeout sicurezza in secondi
+       
+    Returns:
+        True se completata, False se timeout
+    """
+    if not simple_state.imu.is_available():
+        print("⚠️ IMU non disponibile, usa rotate_to_heading tradizionale")
+        return False
+   
+    # Salva heading iniziale per misurare la rotazione relativa
+    simple_state.imu.update_heading()
+    initial_heading = simple_state.imu.get_heading()
+   
+    # Calcola velocità motori
+    speed_left, speed_right = _turn_speeds(direction_str)
+   
+    print(f"🧭 Rotazione IMU {direction_str} target={target_degrees}°", end="")
+   
+    # Inizia rotazione
+    rover.rotate_differential_compensated(direction_str, speed_left, speed_right)
+   
+    start_time = time.time()
+    angle_reached = False
+   
+    try:
+        while time.time() - start_time < timeout:
+            # Aggiorna heading
+            simple_state.imu.update_heading()
+            current_heading = simple_state.imu.get_heading()
+           
+            # Calcola angolo ruotato rispetto al punto iniziale
+            if direction_str == 'left':
+                angle_rotated = (current_heading - initial_heading) % 360
+            else:  # right
+                angle_rotated = (initial_heading - current_heading) % 360
+           
+            # Tolleranza ±2°
+            if abs(angle_rotated - target_degrees) <= 2.0:
+                angle_reached = True
+                break
+           
+            time.sleep(0.02)  # 50Hz
+           
+    finally:
+        rover.stop()
+        time.sleep(0.30)
+   
+    if angle_reached:
+        final_heading = simple_state.imu.get_heading()
+        print(f" ✓ {final_heading:.1f}° in {time.time()-start_time:.2f}s")
+        return True
+    else:
+        print(f" ⚠️ TIMEOUT dopo {timeout}s")
+        return False
+ 
+ 
 def rotate_to_heading(target_heading):
     """
     Ruota verso heading target scegliendo percorso più breve (multipli di 90°).
     Aggiorna simple_state.heading.
+    Usa IMU se abilitato, altrimenti tempo.
     """
     if simple_state.heading == target_heading:
         print(f"✓ Già orientato verso {target_heading}")
@@ -65,33 +129,139 @@ def rotate_to_heading(target_heading):
  
     print(f"🔄 Rotazione {simple_state.heading} → {target_heading}", end="")
  
-    def do_turn(direction_str, t):
+    def do_turn_timed(direction_str, t):
         speed_left, speed_right = _turn_speeds(direction_str)
         rover.rotate_differential_compensated(direction_str, speed_left, speed_right)
         time.sleep(t)
         rover.stop()
         time.sleep(0.30)
+   
+    def do_turn_imu(direction_str):
+        return rotate_90_with_imu(direction_str, target_degrees=90.0)
  
     # Usa tempi separati se calibrati, altrimenti usa il tempo base
     left_time = simple_state.rotation_90_time_left if simple_state.rotation_90_time_left else simple_state.rotation_90_time
     right_time = simple_state.rotation_90_time_right if simple_state.rotation_90_time_right else simple_state.rotation_90_time
  
+    # Scegli metodo: IMU o tempo
+    use_imu = simple_state.use_imu_rotation and simple_state.imu.is_available()
+   
     # percorso più breve
     if clockwise_rotations == 3:
-        print(f" (90° sx, {left_time:.2f}s)")
-        do_turn('left', left_time)
+        if use_imu:
+            print(f" (90° sx IMU)")
+            do_turn_imu('left')
+        else:
+            print(f" (90° sx, {left_time:.2f}s)")
+            do_turn_timed('left', left_time)
     elif clockwise_rotations == 2:
         print(f" (180°, 2 rotazioni dx)")
         for _ in range(2):
-            do_turn('right', right_time)
+            if use_imu:
+                do_turn_imu('right')
+            else:
+                do_turn_timed('right', right_time)
             time.sleep(0.20)
     elif clockwise_rotations == 1:
-        print(f" (90° dx, {right_time:.2f}s)")
-        do_turn('right', right_time)
+        if use_imu:
+            print(f" (90° dx IMU)")
+            do_turn_imu('right')
+        else:
+            print(f" (90° dx, {right_time:.2f}s)")
+            do_turn_timed('right', right_time)
  
     simple_state.heading = target_heading
     print(f"✓ Heading aggiornato: {target_heading}")
+   
     return True
+ 
+ 
+def realign_to_north_with_imu():
+    """
+    Riallinea il robot a Nord (0° rispetto al reference heading) usando IMU.
+    Chiamata DOPO aggiramento ostacolo per correggere eventuali derive.
+    """
+    # Controlla se IMU è disponibile e abilitato
+    if not simple_state.imu.is_available():
+        return
+   
+    if not getattr(simple_state, 'use_imu_rotation', False):
+        return
+   
+    if simple_state.heading != 'N':
+        return  # Funziona solo se già orientato a Nord
+   
+    reference_heading = getattr(simple_state, 'imu_reference_heading', None)
+    if reference_heading is None:
+        return
+   
+    # Leggi heading corrente
+    simple_state.imu.update_heading()
+    current_heading = simple_state.imu.get_heading()
+   
+    # Calcola errore rispetto a Nord (reference_heading)
+    error = current_heading - reference_heading
+   
+    # Normalizza (-180 a +180)
+    if error > 180:
+        error -= 360
+    elif error < -180:
+        error += 360
+   
+    # Se errore piccolo, non fare nulla
+    if abs(error) < 2.0:
+        print(f"✓ Robot già dritto: {current_heading:.1f}° (errore: {error:+.1f}°)")
+        return
+   
+    # Correggi con rotazione closed-loop usando IMU
+    print(f"🔧 Riallineamento a Nord: errore {error:+.1f}° - Correzione IMU...")
+   
+    # Determina direzione
+    if error > 0:  # Deviato verso sinistra (heading maggiore del reference)
+        direction = 'right'  # Ruota a destra per tornare indietro
+        target_angle = error  # Angolo da recuperare
+    else:  # Deviato verso destra (heading minore del reference)
+        direction = 'left'  # Ruota a sinistra per tornare indietro
+        target_angle = abs(error)  # Angolo da recuperare
+   
+    # Usa feedback IMU per correzione precisa
+    speed_left, speed_right = _turn_speeds(direction)
+    rover.rotate_differential_compensated(direction, speed_left, speed_right)
+   
+    start_time = time.time()
+    timeout = 3.0  # Timeout per sicurezza
+   
+    try:
+        while time.time() - start_time < timeout:
+            simple_state.imu.update_heading()
+            current_heading = simple_state.imu.get_heading()
+           
+            # Ricalcola errore
+            error_now = current_heading - reference_heading
+            if error_now > 180:
+                error_now -= 360
+            elif error_now < -180:
+                error_now += 360
+           
+            # Se raggiunto target (entro ±1°), stop
+            if abs(error_now) <= 1.0:
+                break
+           
+            time.sleep(0.02)  # 50Hz
+    finally:
+        rover.stop()
+        time.sleep(0.3)
+   
+    # Verifica risultato finale
+    simple_state.imu.update_heading()
+    final_heading = simple_state.imu.get_heading()
+    final_error = final_heading - reference_heading
+    if final_error > 180:
+        final_error -= 360
+    elif final_error < -180:
+        final_error += 360
+   
+    print(f"✓ Riallineamento completato: {final_heading:.1f}° (errore residuo: {final_error:+.1f}°)")
  
  
 # ============================================================================
@@ -196,7 +366,123 @@ def scan_fan_one_side(side='left', max_angle=90, step=None, threshold=None, stro
  
  
 # ============================================================================
-# MOVIMENTO
+# MOVIMENTO CON ODOMETRIA IMU
+# ============================================================================
+ 
+def move_forward_meters_with_imu(meters, check_obstacles=True, micro_side=None, micro_angle_deg=0):
+    """
+    Muove avanti usando l'accelerometro IMU per stimare la distanza percorsa.
+    Include correzione automatica heading per mantenere traiettoria dritta.
+   
+    Args:
+        meters: distanza target in metri
+        check_obstacles: controlla ostacoli durante movimento
+        micro_side: 'left'/'right' se movimento angolato
+        micro_angle_deg: angolo del movimento rispetto alla direzione principale
+   
+    Returns:
+        True se completato, False se ostacolo
+    """
+    if not simple_state.imu.is_available():
+        # Fallback a movimento normale
+        return move_forward_meters(meters, check_obstacles, micro_side, micro_angle_deg)
+   
+    if meters <= 0:
+        return True
+   
+    print(f"➡️  Movimento IMU {simple_state.heading} per {meters:.2f}m...")
+   
+    # Velocità motori base
+    base_speed_left = DEFAULT_SPEED_LINEAR * simple_state.left_factor
+    base_speed_right = DEFAULT_SPEED_LINEAR * simple_state.right_factor
+   
+    # Reset odometria IMU
+    distance_traveled_imu = 0.0
+    velocity_x = 0.0
+    velocity_y = 0.0
+   
+    # Inizia movimento
+    rover.moveTo('Forward', base_speed_left, base_speed_right)
+   
+    start_time = time.time()
+    last_time = start_time
+    last_check = 0.0
+    timeout = meters / simple_state.meters_per_second_forward * 8.0  # Timeout aumentato per movimenti lenti
+   
+    # Costante di filtraggio per velocità
+    alpha_vel = 0.8
+   
+    while time.time() - start_time < timeout:
+        current_time = time.time()
+        dt = current_time - last_time
+        last_time = current_time
+       
+        if dt < 0.01:
+            time.sleep(0.01)
+            continue
+       
+        # Leggi accelerazioni per odometria
+        ax, ay = simple_state.imu.get_accel_xy()
+       
+        # Filtra e integra velocità (filtro esponenziale per ridurre rumore)
+        velocity_x = alpha_vel * velocity_x + (1 - alpha_vel) * (ax * 9.81 * dt)
+        velocity_y = alpha_vel * velocity_y + (1 - alpha_vel) * (ay * 9.81 * dt)
+       
+        # Calcola modulo velocità
+        velocity = math.sqrt(velocity_x**2 + velocity_y**2)
+       
+        # Integra velocità → distanza
+        distance_traveled_imu += velocity * dt
+       
+        # Controlla ostacoli
+        elapsed = time.time() - start_time
+        if check_obstacles and (elapsed - last_check) > 0.20:
+            distance = _read_distance()
+            print(f"   📡 {distance:.1f}cm | IMU: {distance_traveled_imu:.2f}m/{meters:.2f}m", end='\r')
+            last_check = elapsed
+           
+            if distance < simple_state.obstacle_threshold:
+                rover.stop()
+                print(f"\n🚧 OSTACOLO rilevato a {distance:.1f}cm!")
+                return False
+       
+        # Controlla se target raggiunto
+        if distance_traveled_imu >= meters:
+            break
+       
+        time.sleep(0.02)  # 50Hz
+   
+    rover.stop()
+    time.sleep(0.15)
+   
+    print(f"\n✓ Completato: {distance_traveled_imu:.2f}m in {time.time()-start_time:.2f}s")
+   
+    # Aggiorna stato (maze-aware)
+    if micro_side in ('left', 'right') and micro_angle_deg > 0:
+        theta = math.radians(float(micro_angle_deg))
+        forward_component = distance_traveled_imu * math.cos(theta)
+        lateral_component = distance_traveled_imu * math.sin(theta)
+       
+        simple_state.distance_traveled += forward_component
+       
+        if micro_side == 'right':
+            simple_state.lateral_offset += lateral_component
+        else:
+            simple_state.lateral_offset -= lateral_component
+       
+        print(f"   Step angolato: +{forward_component:.2f}m Nord, {('+' if micro_side=='right' else '-')}{lateral_component:.2f}m")
+        print(f"   Stato: dist={simple_state.distance_traveled:.2f}m, offset={simple_state.lateral_offset:+.2f}m")
+    else:
+        # Movimento cardinale - usa nuova funzione update_position
+        simple_state.update_position(distance_traveled_imu)
+        print(f"   Posizione: ({simple_state.position_x:.2f}, {simple_state.position_y:.2f})m")
+        print(f"   Distanza da start: {simple_state.get_distance_from_start():.2f}m / {simple_state.target_distance:.2f}m")
+   
+    return True
+ 
+ 
+# ============================================================================
+# MOVIMENTO (FALLBACK SENZA IMU)
 # ============================================================================
  
 def move_forward_meters(meters, check_obstacles=True, micro_side=None, micro_angle_deg=0):
@@ -268,19 +554,10 @@ def move_forward_meters(meters, check_obstacles=True, micro_side=None, micro_ang
         print(f"   Stato stimato: dist={simple_state.distance_traveled:.2f}m, offset={simple_state.lateral_offset:+.2f}m")
         return True
  
-    # Cardinale classico
-    if simple_state.heading == 'N':
-        simple_state.distance_traveled += meters
-        print(f"\n✓ Avanzato verso Nord: {simple_state.distance_traveled:.2f}m")
-    elif simple_state.heading == 'S':
-        simple_state.distance_traveled -= meters
-        print(f"\n✓ Avanzato verso Sud: {simple_state.distance_traveled:.2f}m")
-    elif simple_state.heading == 'E':
-        simple_state.lateral_offset += meters
-        print(f"\n✓ Spostato verso Est: offset {simple_state.lateral_offset:+.2f}m")
-    elif simple_state.heading == 'W':
-        simple_state.lateral_offset -= meters
-        print(f"\n✓ Spostato verso Ovest: offset {simple_state.lateral_offset:+.2f}m")
+    # Cardinale classico - usa nuova funzione update_position
+    simple_state.update_position(meters)
+    print(f"\n✓ Movimento completato: Posizione ({simple_state.position_x:.2f}, {simple_state.position_y:.2f})m")
+    print(f"   Distanza da start: {simple_state.get_distance_from_start():.2f}m")
  
     return True
  
@@ -321,7 +598,7 @@ def move_timed(seconds, check_obstacles=True):
  
     rover.stop()
     time.sleep(0.15)
-    
+   
     print(f"\n✓ Movimento completato ({seconds:.1f}s)")
     return True
  
@@ -362,9 +639,43 @@ def scan_directions():
     return distances
  
  
-# ============================================================================
-# UTILITY: INDIETRO
-# ============================================================================
+def scan_all_directions_maze():
+    """
+    Scansiona tutte le 4 direzioni cardinali (N/E/S/W) e ritorna info per maze navigation.
+   
+    Returns:
+        dict: {
+            'N': {'distance': float, 'blocked': bool, 'free': bool},
+            'E': {...},
+            'S': {...},
+            'W': {...}
+        }
+    """
+    original_heading = simple_state.heading
+    results = {}
+   
+    print("\n🔍 Scansione maze (4 direzioni)...")
+   
+    for direction in ['N', 'E', 'S', 'W']:
+        rotate_to_heading(direction)
+        time.sleep(0.15)
+       
+        # Controlla ostacolo fisico
+        blocked, distance = check_obstacle_ahead(threshold=simple_state.obstacle_threshold)
+       
+        results[direction] = {
+            'distance': distance,
+            'blocked': blocked,
+            'free': not blocked  # libero se non bloccato
+        }
+       
+        # Status
+        status = "✅ LIBERO" if not blocked else "🚧 BLOCCATO"
+        print(f"   {direction}: {distance:.1f}cm - {status}")
+   
+    rotate_to_heading(original_heading)
+    return results
+ 
  
 def move_back_meters(meters):
     """
@@ -384,14 +695,8 @@ def move_back_meters(meters):
     rover.stop()
     time.sleep(0.15)
  
-    if simple_state.heading == 'N':
-        simple_state.distance_traveled -= meters
-    elif simple_state.heading == 'S':
-        simple_state.distance_traveled += meters
-    elif simple_state.heading == 'E':
-        simple_state.lateral_offset -= meters
-    elif simple_state.heading == 'W':
-        simple_state.lateral_offset += meters
+    # Aggiorna posizione (movimento all'indietro = negativo)
+    simple_state.update_position(-meters)
  
     print(f"✓ Indietreggiato {meters:.2f}m")
     return True
@@ -399,5 +704,10 @@ def move_back_meters(meters):
  
 def move_backward_meters(meters):
     return move_back_meters(meters)
+ 
+ 
+ 
+ 
+ 
  
  
