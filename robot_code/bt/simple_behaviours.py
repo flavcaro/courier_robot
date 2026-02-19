@@ -52,26 +52,26 @@ def _rotate_to_north_and_realign():
 # =============================================================================
 # NAVIGAZIONE LABIRINTO (WALL-FOLLOWING)
 # =============================================================================
-
+ 
 def _get_left_direction(current_heading):
     """Ritorna la direzione a sinistra di current_heading"""
     directions = ['N', 'E', 'S', 'W']
     idx = directions.index(current_heading)
     return directions[(idx - 1) % 4]  # -1 = sinistra (antiorario)
-
+ 
 def _get_right_direction(current_heading):
     """Ritorna la direzione a destra di current_heading"""
     directions = ['N', 'E', 'S', 'W']
     idx = directions.index(current_heading)
     return directions[(idx + 1) % 4]  # +1 = destra (orario)
-
+ 
 def _get_back_direction(current_heading):
     """Ritorna la direzione opposta a current_heading"""
     directions = ['N', 'E', 'S', 'W']
     idx = directions.index(current_heading)
     return directions[(idx + 2) % 4]  # +2 = dietro
-
-
+ 
+ 
 class MazeNavigator(py_trees.behaviour.Behaviour):
     """
     Navigazione labirinto con WALL-FOLLOWING EFFICIENTE (risparmio batteria).
@@ -89,12 +89,14 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
     
     Il robot NON colpisce i muri - si ferma quando il sensore rileva ostacolo.
     """
-
+ 
     def __init__(self, name="MazeNavigator"):
         super().__init__(name)
         self.iteration = 0
         self.forward_step = 0.5  # metri - step quando muovi avanti
-
+        self.stuck_count = 0  # contatore tentativi quando bloccato
+        self.max_stuck_attempts = 3  # max tentativi prima di FAILURE
+ 
     def initialise(self):
         self.iteration = 0
         rule_name = "Left-Hand Rule" if simple_state.wall_following_rule == 'left' else "Right-Hand Rule"
@@ -109,7 +111,7 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
         print(f"           4️⃣ Indietro (se entrambe laterali bloccate)")
         print(f"Soglia ostacolo: {simple_state.obstacle_threshold:.0f}cm")
         print("="*60 + "\n")
-
+ 
     def update(self):
         # Check successo (con tolleranza per arrotondamenti)
         distance_from_start = simple_state.get_distance_from_start()
@@ -123,7 +125,7 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
             print(f"Posizione finale: ({simple_state.position_x:.2f}, {simple_state.position_y:.2f})m")
             print("="*60)
             return py_trees.common.Status.SUCCESS
-
+ 
         self.iteration += 1
         
         print(f"\n{'='*60}")
@@ -132,7 +134,7 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
         print(f"🧭 Heading: {simple_state.heading}")
         print(f"📏 Distanza da start: {distance_from_start:.2f}m / {simple_state.target_distance:.2f}m")
         print(f"{'='*60}")
-
+ 
         # Passo 1: Controlla sensore nella direzione corrente
         time.sleep(0.2)
         obstacle_ahead, dist_ahead = check_obstacle_ahead(threshold=simple_state.obstacle_threshold)
@@ -185,71 +187,93 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
         #     move_back_meters(backup_distance)
         #     time.sleep(0.3)
         
-        # 🧠 WALL-FOLLOWING EFFICIENTE: Controlla SOLO le laterali (risparmia batteria)
-        # Avanti è già bloccato (per questo siamo qui), non ri-controllarlo
+        # 🧠 WALL-FOLLOWING CON PRIORITÀ DINAMICA
+        # Controlla continuamente, se direzione prioritaria si libera → usala subito!
         # Calcola direzioni relative
         current = simple_state.heading
         left_dir = _get_left_direction(current)
         right_dir = _get_right_direction(current)
         back_dir = _get_back_direction(current)
         
-        # Costruisci ordine priorità SOLO per laterali
+        # Soglia minima assoluta di sicurezza (non andare MAI se muro < 25cm)
+        MIN_SAFE_CLEARANCE = 25.0  # cm
+        clearance_threshold = max(MIN_SAFE_CLEARANCE, simple_state.direction_clearance_threshold)
+        
+        # Costruisci ordine priorità COMPLETO: Avanti > Laterali > Indietro
         if simple_state.wall_following_rule == 'left':
-            # LEFT-HAND RULE: Sinistra > Destra
-            lateral_order = [(left_dir, f"SINISTRA ({left_dir})"), (right_dir, f"DESTRA ({right_dir})")]
-            print(f"   🤚 Left-Hand: Provo {left_dir} (sx) poi {right_dir} (dx)")
+            # LEFT-HAND RULE: Avanti > Sinistra > Destra > Indietro
+            priority_order = [
+                (current, f"AVANTI ({current})"),
+                (left_dir, f"SINISTRA ({left_dir})"),
+                (right_dir, f"DESTRA ({right_dir})"),
+                (back_dir, f"INDIETRO ({back_dir})")
+            ]
+            print(f"   🤚 Left-Hand: Priorità {current} > {left_dir} (sx) > {right_dir} (dx) > {back_dir}")
         else:
-            # RIGHT-HAND RULE: Destra > Sinistra
-            lateral_order = [(right_dir, f"DESTRA ({right_dir})"), (left_dir, f"SINISTRA ({left_dir})")]
-            print(f"   🤚 Right-Hand: Provo {right_dir} (dx) poi {left_dir} (sx)")
+            # RIGHT-HAND RULE: Avanti > Destra > Sinistra > Indietro
+            priority_order = [
+                (current, f"AVANTI ({current})"),
+                (right_dir, f"DESTRA ({right_dir})"),
+                (left_dir, f"SINISTRA ({left_dir})"),
+                (back_dir, f"INDIETRO ({back_dir})")
+            ]
+            print(f"   🤚 Right-Hand: Priorità {current} > {right_dir} (dx) > {left_dir} (sx) > {back_dir}")
         
         chosen_direction = None
         chosen_label = None
         
-        # ⚡ SCANSIONE EFFICIENTE: Controlla SOLO le laterali, ferma alla prima libera
-        for direction, label in lateral_order:
-            # Ruota verso direzione da controllare
+        # 🔄 SCANSIONE CON PRIORITÀ DINAMICA
+        for idx, (direction, label) in enumerate(priority_order):
+            # Prima di girare, ri-controlla TUTTE le direzioni con priorità maggiore
+            # (potrebbero essersi liberate mentre giravamo!)
+            for check_idx in range(idx):
+                check_dir, check_label = priority_order[check_idx]
+                # Gira temporaneamente verso la direzione da ri-controllare
+                rotate_to_heading(check_dir)
+                time.sleep(0.15)
+                
+                distance = rover.getUltrasonicSensor()
+                blocked = distance < clearance_threshold
+                
+                if not blocked:
+                    # Direzione prioritaria si è liberata! Usala subito
+                    chosen_direction = check_dir
+                    chosen_label = check_label
+                    print(f"   ✨ {check_dir} ({check_label:15s}): {distance:.1f}cm - ✅ LIBERATA! (priorità {check_idx+1})")
+                    break
+            
+            # Se abbiamo trovato una direzione liberata con priorità maggiore, stop
+            if chosen_direction is not None:
+                break
+            
+            # Altrimenti controlla la direzione corrente nella lista priorità
             rotate_to_heading(direction)
             time.sleep(0.15)
             
-            # Leggi sensore con soglia PIÙ ALTA per decidere se è percorribile
-            # ⚠️ IMPORTANTE: Serve spazio almeno per uno step (50cm) + margine sicurezza
             distance = rover.getUltrasonicSensor()
-            blocked = distance < simple_state.direction_clearance_threshold  # 60cm invece di 15cm!
+            blocked = distance < clearance_threshold
             
             status = "✅ LIBERO" if not blocked else "🚧 BLOCCATO"
             print(f"   {direction} ({label:15s}): {distance:.1f}cm - {status}")
             
             if not blocked:
-                # Prima laterale libera → SCEGLI E FERMA (non controllare l'altra!)
+                # Prima direzione libera nella sequenza priorità → SCEGLI
                 chosen_direction = direction
                 chosen_label = label
                 print(f"   → {direction} libera! Vado lì ✓")
-                break  # ⚡ STOP: risparmio batteria!
+                break  # ⚡ STOP: trovata direzione percorribile!
         
-        # Se entrambe le laterali sono bloccate → torna indietro (se possibile)
+        # Se nessuna direzione è libera → COMPLETAMENTE BLOCCATO
         if chosen_direction is None:
-            print(f"   ⚠️  Entrambe le laterali bloccate → Controllo indietro...")
-            rotate_to_heading(back_dir)
-            time.sleep(0.15)
-            
-            distance_back = rover.getUltrasonicSensor()
-            if distance_back >= simple_state.direction_clearance_threshold:
-                chosen_direction = back_dir
-                chosen_label = f"INDIETRO ({back_dir})"
-                print(f"   {back_dir} (INDIETRO): {distance_back:.1f}cm - ✅ LIBERO")
-            else:
-                # COMPLETAMENTE BLOCCATO!
-                print(f"   {back_dir} (INDIETRO): {distance_back:.1f}cm - 🚧 BLOCCATO")
-                print(f"\n❌ ROBOT COMPLETAMENTE BLOCCATO - Tutte le direzioni chiuse!")
-                self.stuck_count += 1
-                if self.stuck_count >= self.max_stuck_attempts:
-                    print("💀 Troppi tentativi falliti - Missione impossibile")
-                    return py_trees.common.Status.FAILURE
-                # Prova a indietreggiare un po'
-                print("   → Provo piccolo backup...")
-                move_back_meters(0.3)
-                return py_trees.common.Status.RUNNING
+            print(f"\n❌ ROBOT COMPLETAMENTE BLOCCATO - Tutte le direzioni chiuse!")
+            self.stuck_count += 1
+            if self.stuck_count >= self.max_stuck_attempts:
+                print("💀 Troppi tentativi falliti - Missione impossibile")
+                return py_trees.common.Status.FAILURE
+            # Prova a indietreggiare un po'
+            print("   → Provo piccolo backup...")
+            move_back_meters(0.3)
+            return py_trees.common.Status.RUNNING
         
         # Reset stuck counter
         self.stuck_count = 0
@@ -268,8 +292,8 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
             print(f"   ⚠️  Sensore ha rilevato ostacolo durante movimento")
         
         return py_trees.common.Status.RUNNING
-
-
+ 
+ 
 # =============================================================================
 # GRAB OBJECT
 # =============================================================================
@@ -280,7 +304,7 @@ class GrabObject(py_trees.behaviour.Behaviour):
         self.start_time = None
         self.step = 0
         self.object_detected = False
-
+ 
     def initialise(self):
         # 🔍 CONTROLLO OGGETTO: Verifica se c'è un ostacolo davanti (= oggetto da prendere)
         print("\n" + "=" * 60)
@@ -304,42 +328,42 @@ class GrabObject(py_trees.behaviour.Behaviour):
             rover.beep()  # 3 beep di errore
             print("=" * 60)
             self.object_detected = False
-
+ 
     def update(self):
         # Se non c'è oggetto, termina con FAILURE
         if not self.object_detected:
             return py_trees.common.Status.FAILURE
         
         elapsed = time.time() - self.start_time
-
+ 
         if elapsed < 1.5 and self.step == 0:
             print("   1️⃣ Apertura pinza...")
             open_hand(2000)  # ⬆️ AUMENTATO a 2000ms per apertura completa
             self.step = 1
-
+ 
         elif 1.5 <= elapsed < 3.5 and self.step == 1:
             print("   2️⃣ Abbassamento braccio...")
             arm_down()
             self.step = 2
-
+ 
         elif 3.5 <= elapsed < 5.5 and self.step == 2:
             print("   3️⃣ Chiusura pinza...")
             close_hand(1750)
             self.step = 3
-
+ 
         elif 5.5 <= elapsed < 9.5 and self.step == 3:
             print("   4️⃣ Sollevamento braccio...")
             arm_up()  # ✅ Eseguito correttamente (3.5s wait interno)
             self.step = 4
-
+ 
         elif elapsed >= 9.5 and self.step == 4:
             print("✅ Oggetto raccolto!")
             print("=" * 60)
             return py_trees.common.Status.SUCCESS
-
+ 
         return py_trees.common.Status.RUNNING
-
-
+ 
+ 
 # =============================================================================
 # TREE FACTORY
 # =============================================================================
@@ -362,3 +386,4 @@ def create_main_mission_tree(target_distance=2.4):
     )
  
     return py_trees.trees.BehaviourTree(root)
+ 
