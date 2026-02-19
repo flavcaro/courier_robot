@@ -8,6 +8,7 @@ MeMegaPiDCMotor motor5(PORT3A);
 MeMegaPiDCMotor motor6(PORT3B);
 MeMegaPiDCMotor motorHand(PORT4B);
 MeUltrasonicSensor ultraSensor(PORT_7);
+MeBuzzer buzzer;  // Buzzer per segnali audio
  
 int speed = 100;  // di default
  
@@ -35,7 +36,7 @@ void loop() {
     // ROTAZIONE DIFFERENZIALE (un cingolo avanti, uno indietro)
     // MOLTO PIÙ EFFICIENTE della rotazione normale!
     // ============================================================
-    
+   
     // RotateRight: cingolo SINISTRO avanti, DESTRO indietro
     if (cmd == "RotateRight") {
       motor1.run(speed);      // sinistro avanti
@@ -43,7 +44,7 @@ void loop() {
       motor3.run(speed);      // destro indietro (positivo = indietro per loro)
       motor4.run(speed);      // destro indietro
     }
-    
+   
     // RotateLeft: cingolo SINISTRO indietro, DESTRO avanti
     else if (cmd == "RotateLeft") {
       motor1.run(-speed);     // sinistro indietro
@@ -51,7 +52,7 @@ void loop() {
       motor3.run(-speed);     // destro avanti (negativo = avanti per loro)
       motor4.run(-speed);     // destro avanti
     }
-    
+   
     // RotateRightComp: rotazione destra COMPENSATA per differenze di potenza
     // Formato: "RotateRightComp:speedLeft:speedRight"
     // Esempio: "RotateRightComp:80:75" → sinistro più veloce per compensare debolezza
@@ -60,14 +61,14 @@ void loop() {
       if (sep2 != -1) {
         int speedLeft = input.substring(separatore + 1, sep2).toInt();
         int speedRight = input.substring(sep2 + 1).toInt();
-        
+       
         motor1.run(speedLeft);      // sinistro avanti (compensato)
         motor2.run(speedLeft);
         motor3.run(speedRight);     // destro indietro (compensato)
         motor4.run(speedRight);
       }
     }
-    
+   
     // RotateLeftComp: rotazione sinistra COMPENSATA
     // Formato: "RotateLeftComp:speedLeft:speedRight"
     else if (cmd == "RotateLeftComp") {
@@ -75,14 +76,14 @@ void loop() {
       if (sep2 != -1) {
         int speedLeft = input.substring(separatore + 1, sep2).toInt();
         int speedRight = input.substring(sep2 + 1).toInt();
-        
+       
         motor1.run(-speedLeft);     // sinistro indietro (compensato)
         motor2.run(-speedLeft);
         motor3.run(-speedRight);    // destro avanti (compensato)
         motor4.run(-speedRight);
       }
     }
-    
+   
     // ============================================================
     // COMANDI PER COMPENSAZIONE DERIVA
     // ============================================================
@@ -152,13 +153,13 @@ void loop() {
     } else if (cmd == "armUP"){
       motor5.run(80);
       motor6.run(80);
-      delay(250 * 6);  // 1500ms - movimento completo SU
+      delay(250 * 12);  // 3000ms - movimento completo SU (contro gravità serve più tempo)
       motor5.stop();
       motor6.stop();
     } else if (cmd == "armDown"){
       motor5.run(-80);
       motor6.run(-80);
-      delay(250 * 6);  // 1500ms - movimento completo GIÙ (simmetrico con armUP)
+      delay(250 * 6);  // 1500ms - movimento completo GIÙ (gravità aiuta, più veloce)
       motor5.stop();
       motor6.stop();
     } else if (cmd == "openHand"){
@@ -174,8 +175,16 @@ void loop() {
     } else if (cmd == "getBattery"){
       float voltage = 7.4;
       Serial.println(voltage, 2);
+    } else if (cmd == "beep"){
+      // Beep di errore: 3 bip corti
+      for (int i = 0; i < 3; i++) {
+        buzzer.tone(1000, 200);  // 1000Hz per 200ms
+        delay(300);
+      }
     } else {
       Serial.println("Comando non riconosciuto: " + cmd);
     }
   }
 }
+ 
+ 

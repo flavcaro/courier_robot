@@ -16,7 +16,7 @@ STOP_PAUSE = 0.05
 # COMPENSAZIONE DERIVA: motore sinistro leggermente più veloce
 # ⚠️ NOTA: Questi valori NON sono usati dalla missione!
 # La missione usa simple_state.left_factor/right_factor in simple_state.py
-LEFT_MOTOR_COMPENSATION = 1.30
+LEFT_MOTOR_COMPENSATION = 1.40
 RIGHT_MOTOR_COMPENSATION = 1.00
 
 def move_forward(duration=1.0, speed=DEFAULT_SPEED_LINEAR):
@@ -55,19 +55,21 @@ def move_right(duration=1.0, speed=DEFAULT_SPEED_TURN):
 
 def arm_up():
     rover.armUP()
-    time.sleep(3.0)  # Aumentato per completo ritorno posizione iniziale
+    time.sleep(3.5)  # Firmware corre 3.0s + 0.5s buffer per completamento
 
 
 def arm_down():
     rover.armDown()
-    time.sleep(1.5)  # Simmetrico con arm_up per movimento completo
+    time.sleep(1.5)  # Firmware corre 1.5s (gravità aiuta)
 
 
-def open_hand(pwm=1500):
+def open_hand(pwm=2000):
+    """Apre la pinza (PWM aumentato per apertura completa)"""
     rover.openHand(pwm)
     time.sleep(1.0)
 
 
 def close_hand(pwm=1750):
+    """Chiude la pinza"""
     rover.closeHand(pwm)
     time.sleep(1.0)

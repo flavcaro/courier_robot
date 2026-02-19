@@ -1,3 +1,4 @@
+ 
 """
 Azioni Semplici per Movimento Lineare - SENZA GRIGLIA
  
@@ -112,6 +113,48 @@ def rotate_90_with_imu(direction_str, target_degrees=90.0, timeout=5.0):
         return False
  
  
+def update_imu_reference_after_rotation():
+    """
+    Aggiorna il riferimento IMU dopo una rotazione per compensare drift accumulato.
+    Questo previene che l'errore si accumuli dopo molte rotazioni.
+    """
+    if not simple_state.imu.is_available():
+        return
+   
+    if not hasattr(simple_state, 'imu_reference_heading') or simple_state.imu_reference_heading is None:
+        return
+   
+    # Mappa direzioni cardinali agli angoli IMU
+    heading_map = {'N': 0, 'W': 90, 'S': 180, 'E': 270}
+    if simple_state.heading not in heading_map:
+        return
+   
+    # Leggi heading attuale con piccola media per ridurre rumore
+    readings = []
+    for _ in range(3):
+        simple_state.imu.update_heading()
+        readings.append(simple_state.imu.get_heading())
+        time.sleep(0.02)
+    current_heading = sum(readings) / len(readings)
+   
+    # Calcola nuovo riferimento: sottrai l'offset atteso per questa direzione
+    # Es: Se siamo a W (90°) e heading IMU è 91.5°, nuovo ref = 91.5 - 90 = 1.5°
+    expected_offset = heading_map[simple_state.heading]
+    new_reference = (current_heading - expected_offset) % 360
+   
+    # Normalizza a range ±180° per evitare valori strani
+    if new_reference > 180:
+        new_reference -= 360
+   
+    # Aggiorna il riferimento per i prossimi movimenti
+    old_ref = simple_state.imu_reference_heading
+    simple_state.imu_reference_heading = new_reference
+   
+    # Debug: mostra aggiornamento riferimento
+    if getattr(simple_state, 'imu_heading_correction_debug', False):
+        print(f"   🔄 Rif IMU: {old_ref:.1f}° → {new_reference:.1f}° (heading: {current_heading:.1f}°)")
+ 
+ 
 def rotate_to_heading(target_heading):
     """
     Ruota verso heading target scegliendo percorso più breve (multipli di 90°).
@@ -151,14 +194,24 @@ def rotate_to_heading(target_heading):
         if use_imu:
             print(f" (90° sx IMU)")
             do_turn_imu('left')
+            simple_state.heading = target_heading
+            # DISABILITATO: Aggiornare riferimento accumula errori invece di compensarli
+            # update_imu_reference_after_rotation()
         else:
             print(f" (90° sx, {left_time:.2f}s)")
             do_turn_timed('left', left_time)
+            simple_state.heading = target_heading
     elif clockwise_rotations == 2:
         print(f" (180°, 2 rotazioni dx)")
-        for _ in range(2):
+        for i in range(2):
             if use_imu:
                 do_turn_imu('right')
+                # Aggiorna heading per tracking
+                heading_order = ['N', 'E', 'S', 'W']
+                current_idx_loop = heading_order.index(simple_state.heading)
+                simple_state.heading = heading_order[(current_idx_loop + 1) % 4]
+                # DISABILITATO: Aggiornare riferimento accumula errori
+                # update_imu_reference_after_rotation()
             else:
                 do_turn_timed('right', right_time)
             time.sleep(0.20)
@@ -166,20 +219,31 @@ def rotate_to_heading(target_heading):
         if use_imu:
             print(f" (90° dx IMU)")
             do_turn_imu('right')
+            simple_state.heading = target_heading
+            # DISABILITATO: Aggiornare riferimento accumula errori invece di compensarli
+            # update_imu_reference_after_rotation()
         else:
             print(f" (90° dx, {right_time:.2f}s)")
             do_turn_timed('right', right_time)
+            simple_state.heading = target_heading
  
-    simple_state.heading = target_heading
+    # Conferma (già aggiornato sopra per IMU)
+    if not use_imu:
+        simple_state.heading = target_heading
     print(f"✓ Heading aggiornato: {target_heading}")
+   
+    # DISABILITATO: Riallineamento causava più errori che benefici (IMU rumoroso vicino ai motori)
+    # if use_imu:
+    #     realign_to_north_with_imu()
    
     return True
  
  
 def realign_to_north_with_imu():
     """
-    Riallinea il robot a Nord (0° rispetto al reference heading) usando IMU.
-    Chiamata DOPO aggiramento ostacolo per correggere eventuali derive.
+    Riallinea il robot alla direzione cardinale corrente usando IMU.
+    Funziona per tutte le direzioni (giroscopio misura in senso ANTIORARIO):
+    N=0°, W=90° (sinistra), S=180°, E=270° (destra)
     """
     # Controlla se IMU è disponibile e abilitato
     if not simple_state.imu.is_available():
@@ -188,19 +252,33 @@ def realign_to_north_with_imu():
     if not getattr(simple_state, 'use_imu_rotation', False):
         return
    
-    if simple_state.heading != 'N':
-        return  # Funziona solo se già orientato a Nord
-   
     reference_heading = getattr(simple_state, 'imu_reference_heading', None)
     if reference_heading is None:
         return
    
-    # Leggi heading corrente
-    simple_state.imu.update_heading()
-    current_heading = simple_state.imu.get_heading()
+    # Mappa heading corrente all'angolo target assoluto
+    # IMPORTANTE: Il giroscopio misura in senso ANTIORARIO!
+    # N=0°, W=90° (sinistra), S=180°, E=270° (destra)
+    heading_map = {'N': 0, 'W': 90, 'S': 180, 'E': 270}
+    if simple_state.heading not in heading_map:
+        return
    
-    # Calcola errore rispetto a Nord (reference_heading)
-    error = current_heading - reference_heading
+    # Calcola angolo target per la direzione corrente
+    target_angle = (reference_heading + heading_map[simple_state.heading]) % 360
+   
+    # Stabilizzazione IMU dopo rotazione (riduce rumore motori)
+    time.sleep(0.3)  # Aspetta che vibrazioni si attenuino
+   
+    # Leggi heading corrente con media di più campioni per ridurre rumore
+    readings = []
+    for _ in range(5):
+        simple_state.imu.update_heading()
+        readings.append(simple_state.imu.get_heading())
+        time.sleep(0.05)
+    current_heading = sum(readings) / len(readings)
+   
+    # Calcola errore rispetto al target
+    error = current_heading - target_angle
    
     # Normalizza (-180 a +180)
     if error > 180:
@@ -209,20 +287,21 @@ def realign_to_north_with_imu():
         error += 360
    
     # Se errore piccolo, non fare nulla
-    if abs(error) < 2.0:
-        print(f"✓ Robot già dritto: {current_heading:.1f}° (errore: {error:+.1f}°)")
+    if abs(error) < 4.0:  # Aumentato a 5° per evitare micro-correzioni inutili
+        print(f"✓ Robot già allineato a {simple_state.heading}: {current_heading:.1f}° (target: {target_angle:.1f}°, errore: {error:+.1f}°)")
         return
    
     # Correggi con rotazione closed-loop usando IMU
-    print(f"🔧 Riallineamento a Nord: errore {error:+.1f}° - Correzione IMU...")
+    print(f"🔧 Riallineamento a {simple_state.heading} ({target_angle:.1f}°): errore {error:+.1f}° - Correzione IMU...")
    
     # Determina direzione
-    if error > 0:  # Deviato verso sinistra (heading maggiore del reference)
-        direction = 'right'  # Ruota a destra per tornare indietro
-        target_angle = error  # Angolo da recuperare
-    else:  # Deviato verso destra (heading minore del reference)
-        direction = 'left'  # Ruota a sinistra per tornare indietro
-        target_angle = abs(error)  # Angolo da recuperare
+    # error = current - target (normalizzato -180 a +180)
+    # Se error < 0: current è "prima" del target → ruota RIGHT (verso target)
+    # Se error > 0: current è "dopo" il target → ruota LEFT (verso target)
+    if error < 0:
+        direction = 'right'  # Diminuisce angolo verso target
+    else:
+        direction = 'left'   # Aumenta angolo verso target
    
     # Usa feedback IMU per correzione precisa
     speed_left, speed_right = _turn_speeds(direction)
@@ -236,8 +315,8 @@ def realign_to_north_with_imu():
             simple_state.imu.update_heading()
             current_heading = simple_state.imu.get_heading()
            
-            # Ricalcola errore
-            error_now = current_heading - reference_heading
+            # Ricalcola errore rispetto al target
+            error_now = current_heading - target_angle
             if error_now > 180:
                 error_now -= 360
             elif error_now < -180:
@@ -255,13 +334,13 @@ def realign_to_north_with_imu():
     # Verifica risultato finale
     simple_state.imu.update_heading()
     final_heading = simple_state.imu.get_heading()
-    final_error = final_heading - reference_heading
+    final_error = final_heading - target_angle
     if final_error > 180:
         final_error -= 360
     elif final_error < -180:
         final_error += 360
    
-    print(f"✓ Riallineamento completato: {final_heading:.1f}° (errore residuo: {final_error:+.1f}°)")
+    print(f"✓ Riallineamento completato: {final_heading:.1f}° (target: {target_angle:.1f}°, errore residuo: {final_error:+.1f}°)")
  
  
 # ============================================================================
@@ -372,7 +451,7 @@ def scan_fan_one_side(side='left', max_angle=90, step=None, threshold=None, stro
 def move_forward_meters_with_imu(meters, check_obstacles=True, micro_side=None, micro_angle_deg=0):
     """
     Muove avanti usando l'accelerometro IMU per stimare la distanza percorsa.
-    Include correzione automatica heading per mantenere traiettoria dritta.
+    Include correzione heading CONTINUA durante il movimento (senza fermarsi).
    
     Args:
         meters: distanza target in metri
@@ -390,74 +469,18 @@ def move_forward_meters_with_imu(meters, check_obstacles=True, micro_side=None, 
     if meters <= 0:
         return True
    
-    print(f"➡️  Movimento IMU {simple_state.heading} per {meters:.2f}m...")
+    correction_status = "🔧 correzione continua" if simple_state.use_imu_heading_correction else "standard"
+    print(f"➡️  Movimento {simple_state.heading}: {meters:.2f}m ({correction_status})")
    
-    # Velocità motori base
-    base_speed_left = DEFAULT_SPEED_LINEAR * simple_state.left_factor
-    base_speed_right = DEFAULT_SPEED_LINEAR * simple_state.right_factor
+    # Esegui movimento continuo con correzione integrata
+    if not _move_segment_imu(meters, check_obstacles):
+        return False  # Ostacolo rilevato
    
-    # Reset odometria IMU
-    distance_traveled_imu = 0.0
-    velocity_x = 0.0
-    velocity_y = 0.0
+    print(f"\n✓ Completato: {meters:.2f}m")
    
-    # Inizia movimento
-    rover.moveTo('Forward', base_speed_left, base_speed_right)
+    # Aggiorna posizione finale
+    distance_traveled_imu = meters * simple_state.imu_odometry_scale
    
-    start_time = time.time()
-    last_time = start_time
-    last_check = 0.0
-    timeout = meters / simple_state.meters_per_second_forward * 8.0  # Timeout aumentato per movimenti lenti
-   
-    # Costante di filtraggio per velocità
-    alpha_vel = 0.8
-   
-    while time.time() - start_time < timeout:
-        current_time = time.time()
-        dt = current_time - last_time
-        last_time = current_time
-       
-        if dt < 0.01:
-            time.sleep(0.01)
-            continue
-       
-        # Leggi accelerazioni per odometria
-        ax, ay = simple_state.imu.get_accel_xy()
-       
-        # Filtra e integra velocità (filtro esponenziale per ridurre rumore)
-        velocity_x = alpha_vel * velocity_x + (1 - alpha_vel) * (ax * 9.81 * dt)
-        velocity_y = alpha_vel * velocity_y + (1 - alpha_vel) * (ay * 9.81 * dt)
-       
-        # Calcola modulo velocità
-        velocity = math.sqrt(velocity_x**2 + velocity_y**2)
-       
-        # Integra velocità → distanza
-        distance_traveled_imu += velocity * dt
-       
-        # Controlla ostacoli
-        elapsed = time.time() - start_time
-        if check_obstacles and (elapsed - last_check) > 0.20:
-            distance = _read_distance()
-            print(f"   📡 {distance:.1f}cm | IMU: {distance_traveled_imu:.2f}m/{meters:.2f}m", end='\r')
-            last_check = elapsed
-           
-            if distance < simple_state.obstacle_threshold:
-                rover.stop()
-                print(f"\n🚧 OSTACOLO rilevato a {distance:.1f}cm!")
-                return False
-       
-        # Controlla se target raggiunto
-        if distance_traveled_imu >= meters:
-            break
-       
-        time.sleep(0.02)  # 50Hz
-   
-    rover.stop()
-    time.sleep(0.15)
-   
-    print(f"\n✓ Completato: {distance_traveled_imu:.2f}m in {time.time()-start_time:.2f}s")
-   
-    # Aggiorna stato (maze-aware)
     if micro_side in ('left', 'right') and micro_angle_deg > 0:
         theta = math.radians(float(micro_angle_deg))
         forward_component = distance_traveled_imu * math.cos(theta)
@@ -473,12 +496,251 @@ def move_forward_meters_with_imu(meters, check_obstacles=True, micro_side=None, 
         print(f"   Step angolato: +{forward_component:.2f}m Nord, {('+' if micro_side=='right' else '-')}{lateral_component:.2f}m")
         print(f"   Stato: dist={simple_state.distance_traveled:.2f}m, offset={simple_state.lateral_offset:+.2f}m")
     else:
-        # Movimento cardinale - usa nuova funzione update_position
         simple_state.update_position(distance_traveled_imu)
         print(f"   Posizione: ({simple_state.position_x:.2f}, {simple_state.position_y:.2f})m")
         print(f"   Distanza da start: {simple_state.get_distance_from_start():.2f}m / {simple_state.target_distance:.2f}m")
    
     return True
+ 
+ 
+def _move_segment_imu(meters, check_obstacles=True):
+    """
+    Muove un singolo segmento usando IMU per odometria.
+    CORREZIONE CONTINUA: Aggiusta heading in tempo reale regolando velocità motori.
+    Ritorna True se completato, False se ostacolo.
+    """
+    if not simple_state.imu.is_available():
+        # Fallback senza IMU
+        time_needed = meters / simple_state.meters_per_second_forward
+        rover.moveTo('Forward', DEFAULT_SPEED_LINEAR * simple_state.left_factor,
+                     DEFAULT_SPEED_LINEAR * simple_state.right_factor)
+       
+        start = time.time()
+        while time.time() - start < time_needed:
+            if check_obstacles:
+                dist = _read_distance()
+                if dist < simple_state.obstacle_threshold:
+                    rover.stop()
+                    return False
+            time.sleep(0.1)
+       
+        rover.stop()
+        return True
+   
+    # Velocità motori base
+    base_speed_left = DEFAULT_SPEED_LINEAR * simple_state.left_factor
+    base_speed_right = DEFAULT_SPEED_LINEAR * simple_state.right_factor
+   
+    # Reset odometria IMU
+    distance_traveled_imu = 0.0
+    velocity_x = 0.0
+    velocity_y = 0.0
+   
+    # Heading iniziale per correzione RELATIVA (misura solo deriva durante questo movimento)
+    # ✅ Non usa più heading assoluto che accumula drift, ma solo la deviazione rispetto all'inizio
+    use_heading_correction = simple_state.use_imu_heading_correction and simple_state.imu.is_available()
+    initial_heading = None
+   
+    if use_heading_correction:
+        # Salva heading di partenza - misureremo solo la deriva rispetto a questo
+        simple_state.imu.update_heading()
+        initial_heading = simple_state.imu.get_heading()
+        print(f"   🔧 Correzione RELATIVA attiva: heading_start={initial_heading:.1f}° (misura solo deriva durante movimento)")
+    else:
+        print(f"   ⚠️  Correzione heading disabilitata")
+   
+    # Inizia movimento
+    rover.moveTo('Forward', base_speed_left, base_speed_right)
+   
+    start_time = time.time()
+    last_time = start_time
+    last_check = 0.0
+    last_correction = 0.0
+    last_debug_print = 0.0  # Per stampare stato heading
+    timeout = meters / simple_state.meters_per_second_forward * 8.0
+   
+    # Costante di filtraggio per velocità
+    alpha_vel = 0.95
+   
+    # Guadagno correzione heading (quanto aggressivo)
+    correction_gain = getattr(simple_state, 'imu_heading_correction_gain', 0.25)
+   
+    try:
+        while time.time() - start_time < timeout:
+            current_time = time.time()
+            dt = current_time - last_time
+            last_time = current_time
+           
+            if dt < 0.01:
+                time.sleep(0.01)
+                continue
+           
+            # Leggi accelerazioni per odometria
+            ax, ay = simple_state.imu.get_accel_xy()
+           
+            # Dead-zone per rumore accelerometro
+            ACCEL_THRESHOLD = 0.05
+            if abs(ax) < ACCEL_THRESHOLD:
+                ax = 0.0
+            if abs(ay) < ACCEL_THRESHOLD:
+                ay = 0.0
+           
+            # Filtra e integra velocità
+            velocity_x = alpha_vel * velocity_x + (1 - alpha_vel) * (ax * 9.81 * dt)
+            velocity_y = alpha_vel * velocity_y + (1 - alpha_vel) * (ay * 9.81 * dt)
+           
+            # Calcola modulo velocità
+            velocity = math.sqrt(velocity_x**2 + velocity_y**2)
+           
+            # Integra velocità → distanza
+            distance_traveled_imu += velocity * dt
+           
+            # ===== CORREZIONE HEADING CONTINUA =====
+            # Ogni 100ms controlla heading e aggiusta velocità motori
+            if use_heading_correction and (current_time - last_correction) > 0.10:
+                simple_state.imu.update_heading()
+                current_heading = simple_state.imu.get_heading()
+               
+                # Calcola DERIVA RELATIVA: quanto sto deviando rispetto all'inizio del movimento
+                # ✅ Funziona anche se heading assoluto è impreciso per drift accumulato
+                error = current_heading - initial_heading
+                if error > 180:
+                    error -= 360
+                elif error < -180:
+                    error += 360
+               
+                # Debug periodico: stampa heading ogni secondo
+                if (current_time - last_debug_print) > 1.0:
+                    print(f"\n   🧭 Deriva: {error:+.1f}° (start: {initial_heading:.1f}°, now: {current_heading:.1f}°)", end='')
+                    last_debug_print = current_time
+               
+                # 🔧 CORREZIONE per compensare deriva
+                # Soglia minima per evitare micro-oscillazioni
+                if abs(error) > 0.5:
+                    # Calcola correzione proporzionale
+                    correction = correction_gain * error
+                   
+                    # Applica correzione: limita a ±25% velocità base
+                    correction = max(-0.25, min(0.25, correction))
+                   
+                    # Se error > 0 (deriva destra): aumenta left, riduci right
+                    # Se error < 0 (deriva sinistra): riduci left, aumenta right
+                    speed_left = base_speed_left * (1 + correction)
+                    speed_right = base_speed_right * (1 - correction)
+                   
+                    # Limita velocità [0.3, 1.0]
+                    speed_left = max(0.30, min(1.0, speed_left))
+                    speed_right = max(0.30, min(1.0, speed_right))
+                   
+                    # Debug per ogni correzione
+                    if getattr(simple_state, 'imu_heading_correction_debug', False):
+                        print(f" → CORR: L:{speed_left:.2f} R:{speed_right:.2f}", end='')
+                   
+                    # Applica nuove velocità senza fermarsi
+                    rover.moveTo('Forward', speed_left, speed_right)
+                else:
+                    # Errore minimo (<0.5°) → ritorna a velocità base bilanciate
+                    rover.moveTo('Forward', base_speed_left, base_speed_right)
+                   
+                last_correction = current_time
+           
+            # Controlla ostacoli
+            elapsed = time.time() - start_time
+            if check_obstacles and (elapsed - last_check) > 0.10:  # 100ms - più frequente!
+                distance = _read_distance()
+                print(f"   📡 {distance:.1f}cm | IMU: {distance_traveled_imu:.2f}m/{meters:.2f}m", end='\r')
+                last_check = elapsed
+               
+                if distance < simple_state.obstacle_threshold:
+                    print(f"\n🚧 OSTACOLO rilevato a {distance:.1f}cm!")
+                    # Se MOLTO vicino, indietreggia un po' per sicurezza
+                    if distance < 20.0:
+                        print(f"   ⚠️  Troppo vicino! Piccolo backup...")
+                        rover.moveTo('Back', DEFAULT_SPEED_LINEAR * 0.5, DEFAULT_SPEED_LINEAR * 0.5)
+                        time.sleep(0.3)
+                        rover.stop()
+                        time.sleep(0.1)
+                    return False
+           
+            # Controlla se target raggiunto
+            if distance_traveled_imu >= meters:
+                break
+           
+            time.sleep(0.02)
+    finally:
+        rover.stop()
+        time.sleep(0.15)  # Aumentato per compensare inerzia
+   
+    return True
+ 
+ 
+def _correct_heading_during_movement():
+    """
+    Correzione heading durante movimento dritto.
+    Più affidabile che dopo rotazioni (motori stabili, no torsioni).
+    """
+    if not simple_state.imu.is_available():
+        return
+   
+    reference_heading = getattr(simple_state, 'imu_reference_heading', None)
+    if reference_heading is None:
+        return
+   
+    # Mappa heading corrente all'angolo target
+    heading_map = {'N': 0, 'W': 90, 'S': 180, 'E': 270}
+    if simple_state.heading not in heading_map:
+        return
+   
+    target_angle = (reference_heading + heading_map[simple_state.heading]) % 360
+   
+    # Leggi heading con stabilizzazione breve
+    time.sleep(0.15)
+    readings = []
+    for _ in range(3):
+        simple_state.imu.update_heading()
+        readings.append(simple_state.imu.get_heading())
+        time.sleep(0.03)
+    current_heading = sum(readings) / len(readings)
+   
+    # Calcola errore
+    error = current_heading - target_angle
+    if error > 180:
+        error -= 360
+    elif error < -180:
+        error += 360
+   
+    # Soglia più permissiva durante movimento
+    if abs(error) < 4.0:
+        return
+   
+    # Correzione rapida
+    print(f"\n   🔧 Correzione heading: {error:+.1f}°...", end="")
+   
+    direction = 'right' if error < 0 else 'left'
+    speed_left, speed_right = _turn_speeds(direction)
+    rover.rotate_differential_compensated(direction, speed_left, speed_right)
+   
+    start_time = time.time()
+    try:
+        while time.time() - start_time < 1.0:
+            simple_state.imu.update_heading()
+            current_heading = simple_state.imu.get_heading()
+           
+            error_now = current_heading - target_angle
+            if error_now > 180:
+                error_now -= 360
+            elif error_now < -180:
+                error_now += 360
+           
+            if abs(error_now) <= 3.0:
+                break
+           
+            time.sleep(0.02)
+    finally:
+        rover.stop()
+        time.sleep(0.1)
+   
+    print(f" ✓")
  
  
 # ============================================================================
@@ -516,10 +778,7 @@ def move_forward_meters(meters, check_obstacles=True, micro_side=None, micro_ang
     while time.time() - start_time < time_needed:
         elapsed = time.time() - start_time
  
-        if check_obstacles and (elapsed - last_check) > 0.20:
-            distance = _read_distance()
-            print(f"   📡 {distance:.1f}cm", end='\r')
-            last_check = elapsed
+        if check_obstacles and (elapsed - last_check) > 0.10:  # 100ms - più frequente!
  
             if distance < simple_state.obstacle_threshold:
                 rover.stop()
@@ -704,10 +963,6 @@ def move_back_meters(meters):
  
 def move_backward_meters(meters):
     return move_back_meters(meters)
- 
- 
- 
- 
  
  
  

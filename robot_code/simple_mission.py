@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Maze Mission - Navigazione Labirinto 
-Priorità fissa N > W > E > S, prima direzione libera = scelta
+Maze Mission - Navigazione Labirinto con Wall-Following
+Strategia: Left-Hand Rule (o Right-Hand Rule configurabile)
 
 Features:
-- Sensore ultrasonic controlla continuamente (threshold 20cm default)
+- WALL-FOLLOWING: priorità RELATIVA alla direzione corrente
+- Sensore ultrasonic controlla continuamente (threshold 30cm default)
 - Robot si ferma quando rileva ostacolo (NON colpisce muri)
-- Quando bloccato, controlla direzioni in ordine: N → W → E → S
-- Prima direzione libera trovata = scelta finale (efficiente, risparmia batteria)
-- Nord prioritizzato perché è l'uscita del maze
-- IMU per movimenti precisi
+- Quando bloccato usa: Avanti > Sinistra/Destra > Destra/Sinistra > Indietro
+- Segue il percorso del labirinto tenendo la "mano sul muro"
+- IMU per correzione heading continua e movimenti precisi
+- Correzione automatica deriva durante movimento (no stop/start)
 """
 import time
 import py_trees
@@ -68,12 +69,16 @@ def main():
     """Main entry point per missione labirinto."""
 
     print("="*60)
-    print("🧭 MAZE NAVIGATION MISSION")
+    print("🧭 MAZE NAVIGATION - WALL-FOLLOWING MISSION")
     print("="*60)
     print(f"🔋 Batteria: {rover.getBatteryVoltage():.2f}V")
     print(f"⚙️  Velocità: 60% lineare, 75% rotazione")
-    print(f"🧭 Strategia: Avanza → Sensore rileva muro → Controllo priorità")
-    print(f"   Priorità: N → W → E → S (prima libera = scelta ✓)")
+    print(f"🧠 Strategia: Wall-Following (EFFICIENTE - risparmia batteria)")
+    print(f"   Avanza → Sensore rileva muro → Controlla SOLO laterali")
+    rule_name = "Left-Hand" if simple_state.wall_following_rule == 'left' else "Right-Hand"
+    print(f"   Regola: {rule_name} (prima laterale libera = vai!)")
+    print(f"🔧 IMU: Correzione heading CONTINUA durante movimento")
+    print(f"⚡ Ottimizzazione: Stop scansione alla prima via libera")
     print("="*60)
 
     # Chiedi distanza target
@@ -84,8 +89,9 @@ def main():
     simple_state.target_distance = target_distance
     print(f"   🎯 Target: {target_distance}m dal punto iniziale")
     print(f"   📡 Sensore: ferma robot quando rileva ostacolo (<{simple_state.obstacle_threshold:.0f}cm)")
-    print(f"   🚶 Step: 0.5m per iterazione (con controllo continuo)")
-    print(f"   ⚡ Efficienza: controlla solo fino a prima direzione libera")
+    print(f"   🚶 Step: 0.5m per iterazione (correzione continua IMU)")
+    print(f"   ⚡ Scansione: SOLO laterali, prima libera = vai (risparmio batteria)")
+    print(f"   🧠 Priorità: {'Sx > Dx' if simple_state.wall_following_rule == 'left' else 'Dx > Sx'} > Indietro")
 
     # Calibrazione SEMPLIFICATA
     calibrate_system()

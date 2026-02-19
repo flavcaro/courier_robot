@@ -43,7 +43,7 @@ def test_arm_sequence():
     
     # Step 4: Solleva braccio
     print("\n4️⃣ Sollevamento braccio a posizione iniziale...")
-    arm_up()  # Include sleep(1.5) - simmetrico con arm_down
+    arm_up()  # Include sleep(3.5) - ritorno COMPLETO alla posizione originale
     print("   ✅ Braccio sollevato completamente")
     
     print("\n" + "="*60)

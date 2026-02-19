@@ -207,6 +207,11 @@ class RoverApi:
             print(f"Errore lettura tensione batteria: {data}")
             return 7.4
 
+    def beep(self):
+        """Emette 3 beep di errore"""
+        self._write("beep\n")
+        time.sleep(1.0)  # Attende fine beep (3 beep x 300ms)
+
     def testMovementWithLidar(self, speed=0.5, obstacle_threshold=40):
         print("\n" + "=" * 60)
         print("🤖 TEST MOVIMENTO CON MONITORAGGIO LIDAR")
