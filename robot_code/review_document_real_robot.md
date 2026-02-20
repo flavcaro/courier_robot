@@ -114,8 +114,6 @@ bt/ Module:
 • bt/actions.py: Hardware instantiation — creates the global rover (RoverApi) object,
   defines DEFAULT_SPEED_LINEAR (0.60) and DEFAULT_SPEED_TURN (0.75), and provides
   arm_up(), arm_down(), open_hand(), close_hand() wrappers.
-• bt/sensors.py: Legacy RobotState class (from grid era), kept for compatibility.
-  Contains battery compensation logic and grid/world coordinate converters.
 • bt/imu_sensor.py: IMUSensor class wrapping the MPU6050 library:
   - calibrate(): static offset calibration for gyro Z and accel X/Y.
   - update_heading(): integrates gyro Z over time to track heading (0–360°).
