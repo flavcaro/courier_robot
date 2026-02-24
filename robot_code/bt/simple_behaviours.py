@@ -80,9 +80,9 @@ class MazeNavigator(py_trees.behaviour.Behaviour):
     1. Controlla sensore davanti (direzione corrente)
     2. Se libero (>threshold) → muovi avanti step
     3. Se ostacolo rilevato (≤threshold) → FERMA e scansione EFFICIENTE:
-       ⚡ Controlla SOLO le laterali (non avanti/indietro inutilmente)
-       ⚡ Prima laterale libera → VAI (stop scansione)
-       ⚡ Entrambe bloccate → Gira 180° indietro
+        Controlla SOLO le laterali (non avanti/indietro inutilmente)
+        Prima laterale libera → VAI (stop scansione)
+        Entrambe bloccate → Gira 180° indietro
     4. Left-hand: Sinistra > Destra > Indietro
        Right-hand: Destra > Sinistra > Indietro
     5. Il robot segue il percorso del labirinto tenendo la mano sul muro

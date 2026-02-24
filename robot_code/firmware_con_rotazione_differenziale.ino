@@ -172,9 +172,6 @@ void loop() {
       motorHand.run(100);
       delay(time);
       motorHand.stop();
-    } else if (cmd == "getBattery"){
-      float voltage = 7.4;
-      Serial.println(voltage, 2);
     } else if (cmd == "beep"){
       // Beep di errore: 3 bip corti
       for (int i = 0; i < 3; i++) {

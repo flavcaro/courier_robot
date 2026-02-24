@@ -10,18 +10,8 @@ print("="*60)
 print("🔧 CALIBRAZIONE ROTAZIONE 90°")
 print("="*60)
 print(f"⚙️  Velocità: {DEFAULT_SPEED_TURN*100:.0f}%")
-print(f"🔋 Batteria: {rover.getBatteryVoltage():.2f}V")
 print(f"⏱️  Tempo attuale: {robot_state.base_rotation_90_time}s")
 print("="*60)
-
-# Verifica batterie
-voltage = rover.getBatteryVoltage()
-if voltage < 7.2:
-    print(f"\n⚠️  ATTENZIONE: Batteria bassa ({voltage:.2f}V)")
-    print("    Consigliato ricaricare per calibrazione precisa")
-    print("    (Continuo comunque...)")
-else:
-    print(f"\n✅ Batteria OK ({voltage:.2f}V)")
 
 print("\n📋 PROCEDURA:")
 print("1. Metti un segno sul pavimento allineato col robot")
@@ -76,9 +66,6 @@ print("\n" + "="*60)
 print("📊 RIEPILOGO")
 print("="*60)
 print(f"Velocità rotazione: {DEFAULT_SPEED_TURN*100:.0f}%")
-print(f"Batteria: {rover.getBatteryVoltage():.2f}V")
-print("\n💡 NOTA: Se batteria < 7.4V, tempo aumenterà con batterie cariche!")
-print("   Ri-calibra dopo ricarica completa per precisione massima")
 
 rover.ser.close()
 print("\n👋 Calibrazione completata")

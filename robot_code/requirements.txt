@@ -1,0 +1,18 @@
+# Python Dependencies for Courier Robot Project
+# Install with: pip3 install -r requirements.txt
+
+# Behavior Tree Framework
+py-trees>=2.1.0
+
+# Serial Communication (Arduino/MegaPi)
+pyserial>=3.5
+
+# IMU Sensor (MPU6050)
+mpu6050-raspberrypi>=1.2.0
+smbus2>=0.4.0
+
+# Additional utilities (usually pre-installed)
+# - time (built-in)
+# - math (built-in)
+# - sys (built-in)
+# - os (built-in)

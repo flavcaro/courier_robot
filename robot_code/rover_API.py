@@ -197,16 +197,6 @@ class RoverApi:
     def closeHand(self, t):
         self._write(f"closeHand:{int(t)}\n")
 
-    def getBatteryVoltage(self):
-        self._write("getBattery\n")
-        time.sleep(0.1)
-        data = self.read()
-        try:
-            return float(data)
-        except ValueError:
-            print(f"Errore lettura tensione batteria: {data}")
-            return 7.4
-
     def beep(self):
         """Emette 3 beep di errore"""
         self._write("beep\n")
@@ -218,7 +208,6 @@ class RoverApi:
         print("=" * 60)
         print(f"⚙️  Velocità: {speed*100:.0f}%")
         print(f"🚧 Soglia ostacolo: {obstacle_threshold}cm")
-        print(f"🔋 Batteria: {self.getBatteryVoltage():.2f}V")
         print("\n🚀 Avvio movimento... (Premi Ctrl+C per fermare)")
         print("-" * 60)
 
@@ -255,7 +244,6 @@ class RoverApi:
 
         print("\n" + "=" * 60)
         print(f"✅ Test completato - {sample} campioni letti")
-        print(f"🔋 Batteria finale: {self.getBatteryVoltage():.2f}V")
         print("=" * 60)
 
 

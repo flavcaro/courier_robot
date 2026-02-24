@@ -71,7 +71,6 @@ def main():
     print("="*60)
     print("🧭 MAZE NAVIGATION - WALL-FOLLOWING MISSION")
     print("="*60)
-    print(f"🔋 Batteria: {rover.getBatteryVoltage():.2f}V")
     print(f"⚙️  Velocità: 60% lineare, 75% rotazione")
     print(f"🧠 Strategia: Wall-Following (EFFICIENTE - risparmia batteria)")
     print(f"   Avanza → Sensore rileva muro → Controlla SOLO laterali")

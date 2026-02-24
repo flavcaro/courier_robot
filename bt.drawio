@@ -1,0 +1,123 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3">
+  <diagram name="Behavior Tree" id="behavior-tree">
+    <mxGraphModel dx="1042" dy="626" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="root" value="MainMission&lt;div&gt;&lt;b&gt;SEQUENCE&lt;/b&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9C27B0;strokeColor=#4A148C;strokeWidth=4;fontColor=#FFFFFF;fontSize=14;fontStyle=1" parent="1" vertex="1">
+          <mxGeometry x="480" y="40" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="mazeNav" value="&amp;nbsp;MazeNavigator&lt;br&gt;&lt;b&gt;BEHAVIOR&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#673AB7;strokeColor=#311B92;strokeWidth=3;fontColor=#FFFFFF;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="200" y="140" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="root" target="mazeNav" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="checkDist" value="Check Distance&lt;br&gt;from Start" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FF9800;strokeColor=#E65100;strokeWidth=2;fontColor=#FFFFFF;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="220" y="240" width="120" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="mazeNav" target="checkDist" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="senseObstacle" value="Sense Obstacle&lt;br&gt;Ultrasonic Sensor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00BCD4;strokeColor=#006064;strokeWidth=2;fontColor=#FFFFFF;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="220" y="380" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" value="&amp;lt; Target" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=11;" parent="1" source="checkDist" target="senseObstacle" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="navSuccess" value="✅ Target&lt;br&gt;Reached" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4CAF50;strokeColor=#2E7D32;strokeWidth=3;fontColor=#FFFFFF;fontSize=12;fontStyle=1" parent="1" vertex="1">
+          <mxGeometry x="420" y="260" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" value="≥ Target" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=11;" parent="1" source="checkDist" target="navSuccess" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="obstacleCheck" value="Distance?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FF9800;strokeColor=#E65100;strokeWidth=2;fontColor=#FFFFFF;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="230" y="460" width="100" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="senseObstacle" target="obstacleCheck" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="moveForward" value="&amp;nbsp;Move Forward&lt;br&gt;0.5m step&lt;br&gt;(IMU correction)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2196F3;strokeColor=#0D47A1;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="40" y="465" width="120" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge6" value="&amp;gt; 15cm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=10;" parent="1" source="obstacleCheck" target="moveForward" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="updatePos" value="&amp;nbsp;Update Position&lt;br&gt;(x, y, heading)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2196F3;strokeColor=#0D47A1;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="40" y="560" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="moveForward" target="updatePos" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="wallFollow" value="Stop Robot&lt;div&gt;(Obstacle too close)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00BCD4;strokeColor=#006064;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="390" y="470" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge9" value="≤ 15cm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=10;" parent="1" source="obstacleCheck" target="wallFollow" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="scanDirs" value="&amp;nbsp;Scan Directions&lt;br&gt;(Priority Order)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00BCD4;strokeColor=#006064;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="390" y="560" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="wallFollow" target="scanDirs" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="priorityRule" value="Rule Type?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FF9800;strokeColor=#E65100;strokeWidth=2;fontColor=#FFFFFF;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="400" y="650" width="100" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="scanDirs" target="priorityRule" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rotateLeft" value="Rotate Left&lt;br&gt;90° with IMU" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3F51B5;strokeColor=#1A237E;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="280" y="740" width="110" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge12" value="Left-Hand" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=10;" parent="1" source="priorityRule" target="rotateLeft" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rotateRight" value="&amp;nbsp;Rotate Right&lt;br&gt;90° with IMU" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#3F51B5;strokeColor=#1A237E;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="505" y="740" width="110" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge13" value="Right-Hand" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=10;" parent="1" source="priorityRule" target="rotateRight" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="grabBehavior" value="&amp;nbsp;GrabObject&lt;br&gt;&lt;b&gt;BEHAVIOR&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#673AB7;strokeColor=#311B92;strokeWidth=3;fontColor=#FFFFFF;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="700" y="140" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="root" target="grabBehavior" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="detectObj" value="Detect Object?&lt;br&gt;(&amp;lt;40cm)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FF9800;strokeColor=#E65100;strokeWidth=2;fontColor=#FFFFFF;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="720" y="250" width="120" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="edge19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="grabBehavior" target="detectObj" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="beep" value="Beep Error&lt;br&gt;(3 times)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2196F3;strokeColor=#0D47A1;strokeWidth=2;fontColor=#FFFFFF;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="910" y="270" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge20" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;fontSize=11;" parent="1" source="detectObj" target="beep" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="grabFail" value="❌ FAILURE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f44336;strokeColor=#c62828;strokeWidth=3;fontColor=#FFFFFF;fontSize=12;fontStyle=1" parent="1" vertex="1">
+          <mxGeometry x="910" y="390" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="beep" target="grabFail" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="detectObj" target="grabSuccess" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="780" y="450" as="sourcePoint" />
+            <mxPoint x="780" y="490" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Mk_0Sii1VWKw3CDNSrZD-1" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="edge23">
+          <mxGeometry x="-0.2727" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="grabSuccess" value="Arm Animation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4CAF50;strokeColor=#2E7D32;strokeWidth=3;fontColor=#FFFFFF;fontSize=12;fontStyle=1" parent="1" vertex="1">
+          <mxGeometry x="640" y="390" width="100" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

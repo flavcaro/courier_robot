@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "robot_name": "Courier Robot",
+    "calibration_date": "2026-02-24",
+    "surface_type": "smooth_floor",
+    "battery_level": "100%",
+    "notes": "Default calibration values for maze navigation mission"
+  },
+  
+  "motor_compensation": {
+    "description": "Track/motor compensation factors for straight-line movement",
+    "left_factor": 1.34,
+    "right_factor": 1.00,
+    "notes": "Left track weaker, needs +34% boost to go straight"
+  },
+  
+  "motor_speeds": {
+    "description": "Base speed settings (0.0 to 1.0 ratio)",
+    "linear_speed": 0.60,
+    "turn_speed": 0.75,
+    "notes": "ECO mode - 60% linear for battery optimization"
+  },
+  
+  "velocity": {
+    "description": "Measured robot velocities in meters per second",
+    "forward_mps": 0.044,
+    "lateral_mps": 0.044,
+    "notes": "Calibrate by timing 1 meter movement"
+  },
+  
+  "rotation": {
+    "description": "Rotation timing and compensation",
+    "rotation_90_time_left": 1.99,
+    "rotation_90_time_right": 2.10,
+    "rotation_left_factor": 1.50,
+    "rotation_right_factor": 1.00,
+    "rotation_reverse_boost": 1.30,
+    "rotation_forward_boost": 1.00,
+    "notes": "Left rotation faster (was overshooting). Reverse boost compensates for friction."
+  },
+  
+  "imu": {
+    "description": "IMU sensor configuration and calibration",
+    "available": true,
+    "use_imu_rotation": false,
+    "use_imu_odometry": true,
+    "use_imu_heading_correction": true,
+    "heading_correction_gain": 0.25,
+    "odometry_scale": 0.60,
+    "alpha_filter": 0.98,
+    "update_rate_hz": 20,
+    "calibration": {
+      "gyro_z_offset": 0.0,
+      "accel_x_offset": 0.0,
+      "accel_y_offset": 0.0,
+      "notes": "Run test_imu_calibration.py to set these values"
+    },
+    "notes": "Complementary filter alpha=0.98. Odometry scale compensates for 40% overestimation."
+  },
+  
+  "ultrasonic": {
+    "description": "Ultrasonic sensor thresholds in centimeters",
+    "obstacle_threshold_dynamic": 15.0,
+    "obstacle_threshold_static": 30.0,
+    "direction_clearance_threshold": 40.0,
+    "lateral_clearance_threshold": 35.0,
+    "bypass_verification_threshold": 35.0,
+    "scan_threshold": 50.0,
+    "measurement_characteristics": {
+      "min_range_cm": 2,
+      "max_range_cm": 400,
+      "accuracy_10_30cm": "±2cm",
+      "accuracy_30_100cm": "±3cm",
+      "accuracy_100_200cm": "±5cm",
+      "update_rate_moving_hz": 10,
+      "update_rate_scanning_hz": 5
+    },
+    "notes": "Dynamic threshold lower because robot checks every 100ms while moving"
+  },
+  
+  "mission_parameters": {
+    "description": "Mission-specific movement parameters",
+    "maze_step_size": 0.4,
+    "lateral_step": 0.5,
+    "forward_clearance": 0.5,
+    "wall_following_rule": "left",
+    "micro_turn_degrees": 30,
+    "micro_turn_settle": 0.12,
+    "notes": "Step size calibrated for maze cell dimensions"
+  },
+  
+  "calibration_status": {
+    "motor_balance": "✅ Calibrated",
+    "rotation_timing": "✅ Calibrated",
+    "velocity": "⚠️ Needs verification",
+    "imu_static": "⚠️ Calibrate on startup",
+    "imu_rotation": "🔄 Testing",
+    "imu_odometry": "✅ Calibrated",
+    "ultrasonic": "✅ Calibrated"
+  },
+  
+  "test_files": {
+    "motor_calibration": "test_calibration.py",
+    "rotation_calibration": "test_rotation_calibrate.py",
+    "imu_calibration": "test_imu_calibration.py",
+    "imu_rotation": "test_imu_rotation.py",
+    "imu_odometry": "test_imu_odometry.py",
+    "motor_diagnostic": "test_motors_diagnostic.py",
+    "obstacle_avoidance": "test_obstacle_avoid_simple.py"
+  }
+}

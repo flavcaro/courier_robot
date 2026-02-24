@@ -266,7 +266,6 @@ def main():
     print("="*60)
     print("🤖 TEST AGGIRAMENTO OSTACOLI SEMPLICE")
     print("="*60)
-    print(f"🔋 Batteria: {rover.getBatteryVoltage():.2f}V")
     print(f"⚙️  Velocità: {DEFAULT_SPEED_LINEAR*100:.0f}% lineare, {DEFAULT_SPEED_TURN*100:.0f}% rotazione")
     print(f"🎯 Obiettivo: Nord → Ostacolo → Est → Nord → ripeti")
     print("="*60)

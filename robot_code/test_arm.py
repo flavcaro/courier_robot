@@ -107,7 +107,6 @@ def main():
     print("🔌 CONNESSIONE AL ROVER")
     print("="*60)
     print(f"Porta: {rover.port}")
-    print(f"Batteria: {rover.getBatteryVoltage():.2f}V")
     print("="*60)
     
     # Chiedi modalità

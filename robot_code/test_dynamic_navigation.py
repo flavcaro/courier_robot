@@ -16,7 +16,6 @@ def main():
     print(f"📍 Griglia: {robot_state.grid_size}×{robot_state.grid_size}")
     print(f"📏 Dimensione cella: {robot_state.cell_size}m")
     print(f"⚙️  Velocità: 65% lineare, 75% rotazioni")
-    print(f"🔋 Batteria: {rover.getBatteryVoltage():.2f}V")
     print("="*60)
     
     # Configurazione missione
@@ -49,16 +48,6 @@ def main():
     print(f"   Tempo viaggio: ~{estimated_time:.0f}s")
     print(f"   Con ritorni + ostacoli: ~{estimated_time * 2.5:.0f}s")
     
-    # Warning batteria
-    voltage = rover.getBatteryVoltage()
-    if voltage < 7.2:
-        print(f"\n⚠️  ATTENZIONE: Batteria bassa ({voltage:.2f}V)")
-        print("   Consigliato ricaricare prima della missione!")
-        risposta = input("   Continuo comunque? [s/N]: ").strip().lower()
-        if risposta != 's':
-            print("Missione annullata")
-            return
-    
     # Crea albero
     tree = create_battery_optimized_mission(goal_cell=goal)
     
@@ -87,8 +76,6 @@ def main():
                 print("="*60)
                 robot_state.print_grid()
                 print(f"⏱️  Durata: {elapsed:.1f}s")
-                print(f"🔋 Batteria finale: {rover.getBatteryVoltage():.2f}V")
-                print(f"   Consumo: {voltage - rover.getBatteryVoltage():.2f}V")
                 rover.stop()
                 break
                 
@@ -99,8 +86,7 @@ def main():
                 print("="*60)
                 robot_state.print_grid()
                 print(f"⏱️  Durata: {elapsed:.1f}s")
-                print(f"🔋 Batteria finale: {rover.getBatteryVoltage():.2f}V")
-                print(f"🚧 Ostacoli trovati: {robot_state.obstacles}")
+                print(f" Ostacoli trovati: {robot_state.obstacles}")
                 rover.stop()
                 break
             
